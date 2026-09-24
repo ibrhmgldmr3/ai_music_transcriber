@@ -1,0 +1,27 @@
+# GuitarSet guitar transcription.
+# The model predicts note events; string/fret positions come from the fingering optimizer
+# in music_core.tab (add `tab` to model.heads to also learn a string/fret head).
+extends: base.yaml
+
+dataset:
+  name: guitarset
+  audio_type: mic            # mic | mix | hex_cln | hex
+  val_player: "04"           # players 00-03 -> train, 04 -> val, 05 -> test
+  test_player: "05"
+
+labels:
+  min_midi: 40               # E2, open low-E string
+  max_midi: 88               # E6
+
+tab:
+  tuning: [40, 45, 50, 55, 59, 64]   # low E -> high E (MIDI)
+  num_frets: 20
+
+model:
+  heads: [onset, frame, offset]
+
+paths:
+  raw_dir: ml/data/raw/guitarset
+  processed_dir: ml/data/processed/guitarset
+  splits_dir: ml/data/splits/guitarset
+  checkpoint_dir: ml/checkpoints/guitar

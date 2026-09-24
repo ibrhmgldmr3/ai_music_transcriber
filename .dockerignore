@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+**/node_modules
+**/.next
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+apps/api/storage
+*.db
+ml/data/raw
+ml/data/interim
+ml/data/processed
+ml/checkpoints

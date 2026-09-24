@@ -1,0 +1,80 @@
+# Ports are published on 127.0.0.1 only: the API has no authentication, so it must not
+# be reachable from other machines. Put an authenticating reverse proxy in front before
+# exposing it. Override the database password with POSTGRES_PASSWORD (e.g. in .env).
+
+x-api-env: &api-env
+  DATABASE_URL: postgresql+psycopg://transcriber:${POSTGRES_PASSWORD:-transcriber}@postgres:5432/transcriber
+  REDIS_URL: redis://redis:6379/0
+  USE_CELERY: "true"
+  STORAGE_DIR: /data/storage
+  MODEL_CHECKPOINT: /repo/ml/checkpoints/guitar/best.pt
+  # Optional tab-head model for string/fret placement (ml/configs/guitar_tab.yaml):
+  MODEL_TAB_CHECKPOINT: ${MODEL_TAB_CHECKPOINT:-}
+  CORS_ORIGINS: http://localhost:3000
+
+x-api-volumes: &api-volumes
+  - storage:/data/storage
+  - ./ml/checkpoints:/repo/ml/checkpoints:ro
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: transcriber
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transcriber}
+      POSTGRES_DB: transcriber
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transcriber"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Not published: only the api and worker containers need it.
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: *api-env
+    volumes: *api-volumes
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info --concurrency=1
+    environment: *api-env
+    volumes: *api-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  storage:

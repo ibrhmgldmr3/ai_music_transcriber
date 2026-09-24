@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Local runtime data
+.env
+*.db
+apps/api/storage/
+
+# Datasets and checkpoints (keep the folder structure)
+ml/data/raw/*
+ml/data/interim/*
+ml/data/processed/*
+!ml/data/raw/.gitkeep
+!ml/data/interim/.gitkeep
+!ml/data/processed/.gitkeep
+ml/checkpoints/*
+!ml/checkpoints/.gitkeep

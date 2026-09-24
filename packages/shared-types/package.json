@@ -1,0 +1,8 @@
+{
+  "name": "@music-transcriber/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript types mirroring the API schemas (apps/api/app/schemas).",
+  "main": "index.ts",
+  "types": "index.ts"
+}

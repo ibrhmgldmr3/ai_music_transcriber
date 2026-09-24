@@ -1,0 +1,12 @@
+# API / worker dependencies. The ML pipeline and music_core come from the root package:
+#   pip install -e ".[ml]"   (run in the repository root)
+# Minimum versions include the fixes for known advisories in the upload (multipart) path.
+fastapi>=0.141
+starlette>=1.3.1
+uvicorn[standard]>=0.29
+python-multipart>=0.0.31
+pydantic>=2.6
+pydantic-settings>=2.2
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+celery[redis]>=5.3

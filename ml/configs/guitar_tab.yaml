@@ -1,0 +1,19 @@
+# Adds a learned string/fret (tab) head to the guitar model.
+#
+# The tab head is excellent at choosing positions but costs the shared layers some pitch
+# accuracy, so it is meant as the *second* model of a pair: notes come from the regular
+# guitar model, positions from this one (MODEL_TAB_CHECKPOINT / --tab-checkpoint).
+#
+# GuitarSet test split (player 05), trained on the augmented split:
+#   notes: guitar model 0.90 note F1 (this model alone: 0.84)
+#   positions: 95% of detected notes on the annotated string/fret (optimizer alone: 70%)
+#
+#   python scripts/train.py --config ml/configs/guitar_tab.yaml \
+#       --set paths.splits_dir=ml/data/splits/guitarset_aug training.repeats=1
+extends: guitar.yaml
+
+model:
+  heads: [onset, frame, offset, tab]
+
+paths:
+  checkpoint_dir: ml/checkpoints/guitar_tab

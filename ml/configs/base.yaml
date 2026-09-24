@@ -1,0 +1,106 @@
+# Shared defaults. Instrument configs extend this file with `extends: base.yaml`
+# and override only what differs. Paths are relative to the repository root.
+#
+# Pipeline: audio (44.1 kHz, mono, normalized) -> log-mel / CQT -> CNN -> BiLSTM
+#           -> onset / frame / offset heads -> note events (pitch, onset, offset, confidence)
+
+seed: 42
+
+audio:
+  sample_rate: 44100
+  hop_length: 1024           # ~23 ms per frame (~43 frames/s)
+  normalize: true
+
+features:
+  type: mel                  # mel (v1) | cqt (log-frequency, better suited to guitar)
+  n_fft: 4096
+  n_mels: 229
+  fmin: 30.0
+  n_bins: 192                # CQT: 8 octaves at 24 bins/octave
+  bins_per_octave: 24
+  fmin_midi: 24              # CQT lowest bin: C1
+  log_offset: 1.0e-6
+
+labels:
+  min_midi: 21               # A0 (piano range by default)
+  max_midi: 108              # C8
+  onset_frames: 1            # frames marked as onset after each note start
+  offset_frames: 1           # frames marked as offset at each note end
+
+model:
+  name: crnn                 # cnn | crnn
+  heads: [onset, frame, offset]
+  conv_channels: [32, 64, 128]
+  embed_dim: 512
+  rnn_type: lstm             # lstm | gru
+  rnn_hidden: 256
+  rnn_layers: 2
+  bidirectional: true
+  dropout: 0.25
+
+# On-the-fly augmentation of training crops (train split only).
+augmentation:
+  enabled: true
+  gain_db: 6.0
+  noise_std: 0.0
+  freq_masks: 1
+  freq_mask_width: 8
+  time_masks: 2
+  time_mask_width: 16
+
+# Offline augmentation (V2): extra audio variants rendered by scripts/prepare_dataset.py
+# for the TRAIN split only; labels are transformed accordingly. Never applied to val/test.
+offline_augmentation:
+  enabled: false
+  variants:
+    - {name: ps+1, pitch_shift: 1}
+    - {name: ps-2, pitch_shift: -2}
+    - {name: tempo0.9, time_stretch: 0.9}
+    - {name: tempo1.1, time_stretch: 1.1}
+    - {name: noise, noise_snr_db: [20, 35]}
+    - {name: reverb, reverb: true}
+    - {name: eq, eq: true}
+    - {name: gain, gain_db: 6.0}
+    # Real-world conditions: electric guitar effects and phone / room recordings.
+    - {name: overdrive, distortion: soft}
+    - {name: dist, distortion: hard}
+    - {name: echo, echo: true}
+    - {name: phone, phone: true}
+    - {name: bigroom, reverb: {decay_range: [0.6, 1.6], wet_range: [0.2, 0.5]}}
+    - {name: noisy, noise_snr_db: [8, 20]}
+
+training:
+  epochs: 100
+  batch_size: 16
+  segment_frames: 256        # ~6 s random crops
+  repeats: 4                 # crops per track per epoch
+  lr: 6.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 3.0
+  amp: true                  # mixed precision, CUDA only
+  num_workers: 0             # >0 speeds up loading on Linux; on Windows only with preload: false
+  preload: true              # keep all training tracks in RAM; false = read from disk per item
+  onset_pos_weight: 5.0
+  offset_pos_weight: 5.0
+  loss_weights:
+    onset: 1.0
+    frame: 1.0
+    offset: 0.5
+    tab: 1.0
+  monitor: val_frame_f1
+  monitor_mode: max
+  early_stopping_patience: 15
+
+inference:
+  onset_threshold: 0.5
+  frame_threshold: 0.4
+  offset_threshold: 0.5
+  min_note_duration: 0.05    # seconds
+  chunk_frames: 1024
+  context_frames: 64
+
+paths:
+  raw_dir: ml/data/raw
+  processed_dir: ml/data/processed
+  splits_dir: ml/data/splits
+  checkpoint_dir: ml/checkpoints
