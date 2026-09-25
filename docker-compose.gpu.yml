@@ -1,0 +1,26 @@
+# NVIDIA GPU for transcription and song mode (Demucs):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Needs an NVIDIA driver and GPU support in Docker (Docker Desktop with the WSL 2 backend
+# on Windows, the NVIDIA Container Toolkit on Linux). The CUDA build of PyTorch makes the
+# image several GB larger than the CPU one.
+x-gpu: &gpu
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+    args:
+      TORCH_INDEX_URL: https://download.pytorch.org/whl/cu124
+  environment:
+    MODEL_DEVICE: cuda
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+services:
+  api: *gpu
+  worker: *gpu

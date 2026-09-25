@@ -7,8 +7,10 @@ RUN apt-get update \
 
 WORKDIR /repo
 
-# CPU-only PyTorch keeps the image small; use the CUDA index URL for GPU inference.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# CPU-only PyTorch keeps the image small (inference runs ~30x real time on a CPU);
+# docker-compose.gpu.yml passes a CUDA index instead.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX_URL}
 
 COPY pyproject.toml README.md ./
 COPY packages/music-core packages/music-core
@@ -20,11 +22,11 @@ RUN pip install --no-cache-dir -r apps/api/requirements.txt
 
 COPY apps/api apps/api
 
-# Run unprivileged. The storage directory is created here so the named volume mounted
-# on it inherits this ownership.
+# Run unprivileged. The storage and cache directories are created here so the named
+# volumes mounted on them inherit this ownership.
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /data/storage \
-    && chown app:app /data/storage
+    && mkdir -p /data/storage /home/app/.cache \
+    && chown app:app /data/storage /home/app/.cache
 USER app
 WORKDIR /repo/apps/api
 

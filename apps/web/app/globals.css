@@ -148,3 +148,5 @@ th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
 .chord-lane text { fill: var(--accent-2); font-size: 13px; font-weight: 700; pointer-events: none; }
 .chord-lane.stale text { opacity: 0.4; }
 .notation-select { max-width: 150px; }
+.badge.outdated { color: var(--accent-2); }
+.card.notice { border-color: var(--accent-2); }

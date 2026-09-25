@@ -240,6 +240,40 @@ def test_analysis_of_unsaved_notes(client):
     assert cross_site.status_code == 403
 
 
+def test_projects_record_their_model_and_edits(client):
+    models = client.get("/api/models").json()
+    assert models["version"].startswith(models["notes_model"])
+    pid = upload(client, wav_bytes()).json()["id"]
+    project = client.get(f"/api/projects/{pid}").json()
+    assert (project["model_version"], project["edited"]) == (models["version"], False)
+
+    notes = [{"pitch": 64, "start": 0.0, "end": 0.5}]
+    client.put(f"/api/projects/{pid}/notes", json={"notes": notes})
+    assert client.get(f"/api/projects/{pid}").json()["edited"] is True
+    # A new transcription replaces the edits, so the flag goes back down.
+    client.post(f"/api/projects/{pid}/retranscribe")
+    assert client.get(f"/api/projects/{pid}").json()["edited"] is False
+
+
+def test_model_version_follows_the_checkpoint_file(tmp_path, monkeypatch):
+    from app.config import settings
+
+    checkpoint = tmp_path / "guitar_vX" / "best.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"weights")
+    monkeypatch.setattr(settings, "model_checkpoint", checkpoint)
+    monkeypatch.setattr(settings, "model_tab_checkpoint", None)
+    transcription.model_version.cache_clear()
+    try:
+        first = transcription.model_version()
+        assert first.startswith("guitar_vX@") and "+" not in first
+        checkpoint.write_bytes(b"retrained weights")
+        transcription.model_version.cache_clear()
+        assert transcription.model_version() != first
+    finally:
+        transcription.model_version.cache_clear()
+
+
 def test_note_count_is_limited(client):
     pid = upload(client, wav_bytes()).json()["id"]
     notes = [{"pitch": 60, "start": 0.0, "end": 1.0}] * 51
@@ -394,7 +428,14 @@ def test_existing_database_gets_new_columns(client):
     from app.models.database import engine, init_db
 
     pid = upload(client, wav_bytes()).json()["id"]
-    added = ("separate_guitar", "beats_per_measure", "key_name", "downbeat")
+    added = (
+        "separate_guitar",
+        "beats_per_measure",
+        "key_name",
+        "downbeat",
+        "model_version",
+        "edited",
+    )
     with engine.begin() as connection:  # simulate a database from the first release
         for column in added:
             connection.execute(text(f"ALTER TABLE projects DROP COLUMN {column}"))

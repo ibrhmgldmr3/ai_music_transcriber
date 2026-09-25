@@ -58,6 +58,10 @@ class Project(Base):
     )
     # Song mode: isolate the guitar from a band mix before transcribing.
     separate_guitar: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Models that produced the transcription (services.transcription.model_version) and
+    # whether the user has saved edits since, which a new transcription would discard.
+    model_version: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     tempo: Mapped[float | None] = mapped_column(Float, nullable=True)

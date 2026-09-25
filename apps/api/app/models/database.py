@@ -29,6 +29,8 @@ _ADDED_COLUMNS = [
     ("projects", "beats_per_measure", "INTEGER NOT NULL DEFAULT 4"),
     ("projects", "key_name", "VARCHAR(16)"),
     ("projects", "downbeat", "FLOAT"),
+    ("projects", "model_version", "VARCHAR(96)"),
+    ("projects", "edited", "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
 

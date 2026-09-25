@@ -56,10 +56,20 @@ class ProjectOut(BaseModel):
     filename: str
     status: ProjectStatus
     separate_guitar: bool
+    # Models that transcribed it (null before this was recorded) and whether the user
+    # saved edits since.
+    model_version: str | None
+    edited: bool
     error: str | None
     duration: float | None
     created_at: datetime
     updated_at: datetime
+
+
+class ModelInfo(BaseModel):
+    version: str  # compare with ProjectOut.model_version
+    notes_model: str  # checkpoint folder, e.g. "guitar_v8"
+    tab_model: str | None
 
 
 class TranscriptionOut(BaseModel):

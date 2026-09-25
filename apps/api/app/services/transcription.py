@@ -1,7 +1,9 @@
+import hashlib
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -32,6 +34,29 @@ def get_predictor():
         device=settings.model_device,
         tab_checkpoint=settings.model_tab_checkpoint,
     )
+
+
+@lru_cache(maxsize=1)
+def model_version() -> str:
+    """The installed models, e.g. ``guitar_v8@1a2b3c4d+guitar_v7@5e6f7a8b``.
+
+    Checkpoint folder plus a fingerprint of the file (size and modification time), so a
+    retrained or replaced model gets a new version. Cached like the predictor: both
+    describe what this process loaded when it first needed them.
+    """
+    paths = [settings.model_checkpoint]
+    if settings.model_tab_checkpoint:
+        paths.append(settings.model_tab_checkpoint)
+    return "+".join(_fingerprint(path) for path in paths)
+
+
+def _fingerprint(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return f"{path.parent.name}@missing"
+    digest = hashlib.sha1(f"{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:8]
+    return f"{path.parent.name}@{digest}"
 
 
 @lru_cache(maxsize=1)
@@ -123,6 +148,8 @@ def run_transcription(project_id: str) -> None:
         duration=result.duration,
         tempo=result.tempo,
         tuning=result.tuning,
+        model_version=model_version(),
+        edited=False,
         status=ProjectStatus.completed,
     )
     if stored:

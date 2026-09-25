@@ -26,10 +26,22 @@ export interface Project {
   status: ProjectStatus;
   /** Song mode: the guitar is isolated from a band mix before transcription. */
   separate_guitar: boolean;
+  /** Models that transcribed it (compare with ModelInfo.version); null if unknown. */
+  model_version: string | null;
+  /** The user saved edits since the transcription; re-transcribing discards them. */
+  edited: boolean;
   error: string | null;
   duration: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** The models new transcriptions use (GET /api/models). */
+export interface ModelInfo {
+  version: string;
+  /** Checkpoint folders, e.g. "guitar_v8". */
+  notes_model: string;
+  tab_model: string | null;
 }
 
 export interface Transcription {

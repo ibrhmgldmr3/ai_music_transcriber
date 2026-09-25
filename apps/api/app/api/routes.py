@@ -205,6 +205,7 @@ def update_notes(
         num_frets=max(DEFAULT_NUM_FRETS, highest_fret),  # never discard a chosen high fret
     )
     project.notes = [note.to_dict() for note in notes]
+    project.edited = True
     if payload.tempo is not None:
         project.tempo = round(payload.tempo, 2)
     if payload.beats_per_measure is not None:

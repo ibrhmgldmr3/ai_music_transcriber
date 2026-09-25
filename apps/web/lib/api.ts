@@ -1,6 +1,7 @@
 import type {
   Analysis,
   AnalysisRequest,
+  ModelInfo,
   Note,
   NotesUpdate,
   Project,
@@ -63,6 +64,18 @@ export const tabUrl = (id: string) => `${API_URL}/api${projectPath(id)}/tab`;
 export const musicXmlUrl = (id: string) => `${API_URL}/api${projectPath(id)}/musicxml`;
 
 export const listProjects = () => request<Project[]>("/projects");
+export const getModelInfo = () => request<ModelInfo>("/models");
+
+/** "guitar_v8@1a2b3c4d+guitar_v7@5e6f7a8b" -> "guitar_v8 + guitar_v7". */
+export const modelLabel = (version: string) =>
+  version
+    .split("+")
+    .map((part) => part.split("@")[0])
+    .join(" + ");
+
+/** A finished transcription made by other models than the current ones. */
+export const isOutdated = (project: Project, models: ModelInfo | null) =>
+  models !== null && project.status === "completed" && project.model_version !== models.version;
 export const getProject = (id: string) => request<Project>(projectPath(id));
 export const deleteProject = (id: string) => request<void>(projectPath(id), { method: "DELETE" });
 export const retranscribe = (id: string, separateGuitar?: boolean) => {

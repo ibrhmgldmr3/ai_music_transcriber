@@ -177,18 +177,27 @@ python scripts/tune_thresholds.py --checkpoint ml/checkpoints/guitar_v8/best.pt 
 
 Değerlendirme şu metrikleri raporlar: frame F1, nota F1 (yalnız onset / onset+offset, `mir_eval`), tab doğruluğu (doğru tespit edilen notaların doğru tel ve perdeye yerleşme oranı) ve ortalama güven.
 
+**Uzun eğitimleri kendi terminalinden başlat.** Bir editör ya da asistan oturumunun başlattığı süreçler, o oturum kapanınca onunla birlikte kapanabilir. PowerShell'de eğitimi ayrı bir pencerede başlatıp çıktısını dosyaya yazmak için:
+
+```powershell
+Start-Process python -ArgumentList "scripts/train.py --config ml/configs/guitar_mixed.yaml" -RedirectStandardOutput train.log -RedirectStandardError train.err -WindowStyle Minimized
+```
+
+Yarıda kalan bir eğitim `--resume ml/checkpoints/<klasör>/last.pt` ile kaldığı epoch'tan sürer.
+
 ## Uygulamayı çalıştırma
 
 ### Docker
 
 ```bash
-docker compose up --build
+docker compose up --build                                                  # CPU
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build  # NVIDIA GPU
 ```
 
-- Web: http://localhost:3000
+- Web: http://localhost:3000 (üretim derlemesi, `next start`)
 - API: http://localhost:8000/docs
 
-Model checkpoint'i `ml/checkpoints/guitar/best.pt` konumunda olmalıdır. Checkpoint yoksa yüklenen kayıtlar açıklayıcı bir hata mesajıyla **Başarısız** durumuna düşer.
+Modeller `ml/checkpoints` klasöründen salt-okunur bağlanır. Varsayılan çift `guitar_v8` (notalar) ve `guitar_v7` (tel/perde); başka klasörler `NOTES_MODEL` ve `TAB_MODEL` ortam değişkenleriyle (ör. proje kökündeki `.env`) seçilir. Checkpoint yoksa yüklenen kayıtlar açıklayıcı bir hata mesajıyla **Başarısız** durumuna düşer. CPU imajı yeterince hızlı: 22 saniyelik bir kaydı CPU'da 0.7 s'de çözüyor. GPU asıl şarkı modunda (Demucs) fark ediyor ve imajı birkaç GB büyütüyor. Demucs ağırlıkları ilk kullanımda indirilip `model-cache` volume'unda saklanır.
 
 ### Lokal geliştirme
 
@@ -315,9 +324,21 @@ Mevcut korumalar:
 | `GET` | `/api/projects/{id}/musicxml` | Nota + TAB içeren MusicXML (MuseScore, Guitar Pro) |
 | `GET` | `/api/projects/{id}/tab` | ASCII TAB dışa aktar |
 | `POST` | `/api/analysis` | Verilen notaların tonu, ölçü ızgarası ve akorları (kaydedilmemiş düzenlemeler için) |
+| `GET` | `/api/models` | Yeni transkripsiyonların kullandığı modeller (`version`) |
+
+Her proje, onu çözen modelin sürümünü (`model_version`: checkpoint klasörü ve dosya parmak izi) ve kullanıcının düzenleme kaydedip kaydetmediğini (`edited`) taşır. Model değişince proje listesi eski modelle çözülenleri işaretler; düzenlenmemiş olanlar tek tuşla güncel modelle yeniden çözümlenebilir. Düzenlenmiş projeler, düzenlemeler kaybolacağı için yalnızca editörden tek tek yenilenir.
 
 ## Testler
 
 ```bash
-pytest
+pytest                        # Python: API, analiz, MusicXML, veri setleri, model...
+cd apps/web && npm test       # Web (Vitest)
 ```
+
+Web uygulaması nota adlandırmayı ve ölçü numaralandırmayı TypeScript'te `music_core` ile aynı şekilde yapıyor. İkisinin ayrışmaması için Python'un ürettiği ortak bir fixture (`tests/fixtures/music_web.json`) her iki tarafta da test ediliyor. Python tarafı bilerek değiştirildiğinde fixture'ı yeniden üretmek için:
+
+```bash
+python tests/test_web_fixtures.py
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) her push ve pull request'te ruff, pytest, TypeScript tip denetimi, Vitest ve Next.js üretim derlemesini çalıştırır. Veri seti ya da model checkpoint'i gerekmez.

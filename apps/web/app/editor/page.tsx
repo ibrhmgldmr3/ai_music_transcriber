@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import type { Analysis, Note, Project, Transcription } from "@music-transcriber/shared-types";
+import type { Analysis, ModelInfo, Note, Project, Transcription } from "@music-transcriber/shared-types";
 import GuitarTab from "@/components/GuitarTab";
 import NoteEditor from "@/components/NoteEditor";
 import PianoRoll from "@/components/PianoRoll";
@@ -14,9 +14,12 @@ import {
   analyzeNotes,
   audioUrl,
   errorMessage,
+  getModelInfo,
   getProject,
   getTranscription,
+  isOutdated,
   midiUrl,
+  modelLabel,
   musicXmlUrl,
   retranscribe,
   saveNotes,
@@ -65,6 +68,13 @@ function Editor() {
   const [songMode, setSongMode] = useState(false);
   const [listen, setListen] = useState<ListenMode>("audio");
   const [metronome, setMetronome] = useState(false);
+  const [models, setModels] = useState<ModelInfo | null>(null);
+
+  useEffect(() => {
+    getModelInfo()
+      .then(setModels)
+      .catch(() => setModels(null));
+  }, []);
 
   const applyTranscription = useCallback((t: Transcription) => {
     setTranscription(t);
@@ -238,7 +248,8 @@ function Editor() {
 
   const rerun = async () => {
     if (!id) return;
-    if (dirty && !confirm("Kaydedilmemiş değişiklikler kaybolacak. Devam edilsin mi?")) return;
+    const lost = dirty ? "Kaydedilmemiş değişiklikler" : project?.edited ? "Kaydettiğiniz düzenlemeler" : null;
+    if (lost && !confirm(`${lost} kaybolacak. Devam edilsin mi?`)) return;
     try {
       setProject(await retranscribe(id, songMode));
       setTranscription(null);
@@ -350,6 +361,18 @@ function Editor() {
       {busy && <div className="card muted">Model kaydı çözümlüyor… Sayfa otomatik olarak güncellenecek.</div>}
       {project?.status === "failed" && <div className="card error">Çözümleme başarısız: {project.error}</div>}
       {dirty && <p className="muted small">Kaydedilmemiş değişiklikler var. Dışa aktarmadan önce kaydedin.</p>}
+      {project && models && isOutdated(project, models) && (
+        <div className="card notice row between">
+          <span>
+            Bu kayıt {project.model_version ? `eski bir modelle (${modelLabel(project.model_version)})` : "eski bir modelle"}{" "}
+            çözüldü. Güncel model: {modelLabel(models.version)}.
+            {project.edited && " Yeniden çözümlerseniz kaydettiğiniz düzenlemeler kaybolur."}
+          </span>
+          <button onClick={() => void rerun()} disabled={busy}>
+            Güncel modelle yeniden çözümle
+          </button>
+        </div>
+      )}
 
       <Waveform
         audioUrl={audioUrl(id)}

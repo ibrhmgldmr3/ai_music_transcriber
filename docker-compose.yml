@@ -1,20 +1,29 @@
 # Ports are published on 127.0.0.1 only: the API has no authentication, so it must not
 # be reachable from other machines. Put an authenticating reverse proxy in front before
 # exposing it. Override the database password with POSTGRES_PASSWORD (e.g. in .env).
+#
+# Models: checkpoint folders under ml/checkpoints, mounted read-only. Pick others with
+# NOTES_MODEL / TAB_MODEL (e.g. in .env). GPU: add -f docker-compose.gpu.yml.
+
+# Fixed project name, so containers, images and volumes don't depend on (or collide via)
+# the checkout's folder name.
+name: music-transcriber
 
 x-api-env: &api-env
   DATABASE_URL: postgresql+psycopg://transcriber:${POSTGRES_PASSWORD:-transcriber}@postgres:5432/transcriber
   REDIS_URL: redis://redis:6379/0
   USE_CELERY: "true"
   STORAGE_DIR: /data/storage
-  MODEL_CHECKPOINT: /repo/ml/checkpoints/guitar/best.pt
-  # Optional tab-head model for string/fret placement (ml/configs/guitar_tab.yaml):
-  MODEL_TAB_CHECKPOINT: ${MODEL_TAB_CHECKPOINT:-}
+  MODEL_CHECKPOINT: /repo/ml/checkpoints/${NOTES_MODEL:-guitar_v8}/best.pt
+  # Tab-head model that places notes on strings/frets (ml/configs/guitar_tab_mixed.yaml):
+  MODEL_TAB_CHECKPOINT: /repo/ml/checkpoints/${TAB_MODEL:-guitar_v7}/best.pt
   CORS_ORIGINS: http://localhost:3000
 
 x-api-volumes: &api-volumes
   - storage:/data/storage
   - ./ml/checkpoints:/repo/ml/checkpoints:ro
+  # Demucs (song mode) downloads its weights on first use; keep them between runs.
+  - model-cache:/home/app/.cache
 
 services:
   postgres:
@@ -25,8 +34,8 @@ services:
       POSTGRES_DB: transcriber
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Not published: only the api and worker containers need it, and a local PostgreSQL
+    # on the host usually holds 5432. For a SQL client, add ports: ["127.0.0.1:5433:5432"].
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U transcriber"]
       interval: 5s
@@ -45,6 +54,11 @@ services:
     volumes: *api-volumes
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,13 +82,16 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      args:
+        # Where the browser reaches the API; baked into the build.
+        NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres-data:
   storage:
+  model-cache:
