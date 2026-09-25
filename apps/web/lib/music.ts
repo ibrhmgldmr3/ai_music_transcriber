@@ -1,3 +1,5 @@
+import type { MusicKey } from "@music-transcriber/shared-types";
+
 export const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 export const MAX_FRET = 24;
 
@@ -6,8 +8,49 @@ const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
 
 const pitchClass = (midi: number) => ((midi % 12) + 12) % 12;
 
-export function midiToName(midi: number): string {
-  return `${NOTE_NAMES[pitchClass(midi)]}${Math.floor(midi / 12) - 1}`;
+// Keep in sync with KEY_NAMES in packages/music-core/analysis.py.
+export const KEY_NAMES = [
+  ...["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"].map((t) => `${t} major`),
+  ...["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"].map((t) => `${t} minor`),
+];
+
+// Note spelling, mirroring spell() in packages/music-core/analysis.py.
+const LETTERS = "CDEFGAB";
+const NATURAL: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const CIRCLE = ["Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F", "C", "G", "D", "A", "E", "B", "F#", "C#"];
+const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+const CHROMATIC: Record<number, [string, string, string]> = {
+  1: ["C#", "C#", "Db"],
+  3: ["Eb", "D#", "Eb"],
+  6: ["F#", "F#", "Gb"],
+  8: ["Ab", "G#", "Ab"],
+  10: ["Bb", "A#", "Bb"],
+};
+
+/** Letter and alteration of a pitch in `key` (Bb in F major, A# in B major). */
+export function spell(midi: number, key?: MusicKey | null): { letter: string; alter: number } {
+  const pc = pitchClass(midi);
+  const fifths = key?.fifths ?? 0;
+  const major = CIRCLE[fifths + 7];
+  const tonic = pitchClass(NATURAL[major[0]] + (major.endsWith("#") ? 1 : major.endsWith("b") ? -1 : 0));
+  let degree = MAJOR_SCALE.findIndex((step) => (tonic + step) % 12 === pc);
+  if (degree < 0 && key?.mode === "minor" && pc === pitchClass(key.tonic - 1)) degree = 4;
+  if (degree >= 0) {
+    const letter = LETTERS[(LETTERS.indexOf(major[0]) + degree) % 7];
+    return { letter, alter: ((pc - NATURAL[letter] + 18) % 12) - 6 };
+  }
+  if (!(pc in CHROMATIC)) {
+    return { letter: Object.keys(NATURAL).find((l) => NATURAL[l] === pc) ?? "C", alter: 0 };
+  }
+  const name = CHROMATIC[pc][fifths === 0 ? 0 : fifths > 0 ? 1 : 2];
+  return { letter: name[0], alter: name.endsWith("#") ? 1 : -1 };
+}
+
+/** 61 -> "C#4", or "Db4" in a flat key; the octave follows the letter (B#3 = 60). */
+export function midiToName(midi: number, key?: MusicKey | null): string {
+  const { letter, alter } = spell(midi, key);
+  const accidental = alter > 0 ? "#".repeat(alter) : "b".repeat(-alter);
+  return `${letter}${accidental}${Math.floor((midi - alter) / 12) - 1}`;
 }
 
 export function isBlackKey(midi: number): boolean {
@@ -54,4 +97,38 @@ export function formatTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds - minutes * 60;
   return `${minutes}:${rest.toFixed(1).padStart(4, "0")}`;
+}
+
+export interface BeatGrid {
+  /** Beat times (seconds) within the recording. */
+  beats: number[];
+  /** Bar lines with 1-based bar numbers, matching the MusicXML measures. */
+  bars: { time: number; number: number }[];
+}
+
+/**
+ * Beats and bar lines from the tempo and a bar line time, numbered like the MusicXML
+ * export: bar 1 is the last bar line at or before the first note.
+ */
+export function beatGrid(
+  tempo: number,
+  beatsPerMeasure: number,
+  downbeat: number,
+  firstNote: number,
+  duration: number,
+): BeatGrid {
+  const beat = 60 / tempo;
+  const bar = beat * beatsPerMeasure;
+  if (!(beat > 0) || !Number.isFinite(duration)) return { beats: [], bars: [] };
+  const firstBar = Math.floor((firstNote - downbeat + beat / 8) / bar);
+  const beats: number[] = [];
+  const bars: BeatGrid["bars"] = [];
+  const startIndex = Math.ceil(-downbeat / beat);
+  for (let i = startIndex; downbeat + i * beat <= duration; i++) {
+    const time = downbeat + i * beat;
+    const inBar = ((i % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure;
+    if (inBar === 0) bars.push({ time, number: Math.floor(i / beatsPerMeasure) - firstBar + 1 });
+    else beats.push(time);
+  }
+  return { beats, bars };
 }

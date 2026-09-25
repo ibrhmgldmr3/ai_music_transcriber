@@ -1,3 +1,21 @@
-from app.schemas.project import NoteSchema, NotesUpdate, ProjectOut, TranscriptionOut
+from app.schemas.project import (
+    AnalysisOut,
+    AnalysisRequest,
+    ChordOut,
+    KeyOut,
+    NoteSchema,
+    NotesUpdate,
+    ProjectOut,
+    TranscriptionOut,
+)
 
-__all__ = ["NoteSchema", "NotesUpdate", "ProjectOut", "TranscriptionOut"]
+__all__ = [
+    "AnalysisOut",
+    "AnalysisRequest",
+    "ChordOut",
+    "KeyOut",
+    "NoteSchema",
+    "NotesUpdate",
+    "ProjectOut",
+    "TranscriptionOut",
+]

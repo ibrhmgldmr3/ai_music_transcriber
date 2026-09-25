@@ -1,0 +1,24 @@
+# Note model on GuitarSet (with offline augmentation) + Guitar-TECHS: acoustic and
+# electric guitar, amplifier and room microphones. EGDB is left out here: its labels
+# mostly carry the tablature's quantized timing, which lowered note F1 even on EGDB
+# (it trains the tab model instead, guitar_tab_mixed.yaml).
+#
+#   python scripts/prepare_dataset.py --augment --set paths.splits_dir=ml/data/splits/guitarset_fx
+#   python scripts/prepare_dataset.py --dataset guitar_techs
+#   python scripts/mix_splits.py --out ml/data/splits/mixed_notes \
+#       guitarset=ml/data/splits/guitarset_fx guitar_techs=ml/data/splits/guitar_techs
+#
+# guitar_v8 = guitar_v4 fine-tuned on this mix for 30 epochs:
+#   python scripts/train.py --config ml/configs/guitar_mixed.yaml \
+#       --init ml/checkpoints/guitar_v4/best.pt --set training.lr=2e-4 training.epochs=30
+extends: guitar.yaml
+
+paths:
+  processed_dir: ml/data/processed
+  splits_dir: ml/data/splits/mixed_notes
+  checkpoint_dir: ml/checkpoints/guitar_mixed
+
+training:
+  repeats: 1
+  preload: false             # the mix does not fit in RAM
+  num_workers: 3

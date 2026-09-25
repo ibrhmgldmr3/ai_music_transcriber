@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 from tqdm import tqdm
 
-from ml.config import load_config
+from ml.config import apply_overrides, load_config, parse_overrides
 from ml.datasets.dataset import read_split
 from ml.datasets.guitarset import find_tracks, load_track
 from ml.evaluation.metrics import note_metrics, tab_note_accuracy
@@ -93,6 +93,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--tab-checkpoint", type=Path)
     parser.add_argument("--split", default="test", choices=["val", "test"])
     parser.add_argument("--config", type=Path, help="take data paths from this config instead")
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        nargs="*",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override data paths, e.g. paths.splits_dir=ml/data/splits/guitarset_full",
+    )
     parser.add_argument("--output", type=Path, help="results JSON (default: next to checkpoint)")
     parser.add_argument("--device", default=None)
     args = parser.parse_args(argv)
@@ -103,6 +111,7 @@ def main(argv: list[str] | None = None) -> None:
     cfg = predictor.cfg
     if args.config:
         cfg = {**cfg, "paths": load_config(args.config)["paths"]}
+    cfg = apply_overrides(cfg, parse_overrides(args.overrides))
     track_ids = [n for n in read_split(Path(cfg["paths"]["splits_dir"]) / f"{args.split}.txt")]
     results = benchmark(predictor, cfg, [n for n in track_ids if "__" not in n])
 

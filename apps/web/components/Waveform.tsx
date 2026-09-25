@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { formatTime } from "@/lib/music";
+import type { LoopRange } from "@/lib/usePlayback";
 
 const BUCKETS = 2000;
+const DRAG_PIXELS = 4; // less movement than this is a click (seek)
 
 interface WaveformProps {
   audioUrl: string;
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  /** Dragging across the waveform selects a loop. */
+  loop?: LoopRange | null;
+  onLoopChange?: (range: LoopRange | null) => void;
   height?: number;
 }
 
@@ -46,8 +51,18 @@ function tickStep(duration: number): number {
   return steps.find((s) => duration / s <= 12) ?? 600;
 }
 
-export default function Waveform({ audioUrl, currentTime, duration, onSeek, height = 80 }: WaveformProps) {
+export default function Waveform({
+  audioUrl,
+  currentTime,
+  duration,
+  onSeek,
+  loop = null,
+  onLoopChange,
+  height = 80,
+}: WaveformProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; time: number } | null>(null);
+  const [selection, setSelection] = useState<LoopRange | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [failed, setFailed] = useState(false);
@@ -106,18 +121,60 @@ export default function Waveform({ audioUrl, currentTime, duration, onSeek, heig
     return result;
   }, [duration]);
 
-  const onClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (duration <= 0) return;
+  const timeAt = (e: PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    onSeek(((e.clientX - rect.left) / rect.width) * duration);
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * duration;
+  };
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (duration <= 0 || e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { x: e.clientX, time: timeAt(e) };
+  };
+
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || !onLoopChange || Math.abs(e.clientX - drag.x) < DRAG_PIXELS) return;
+    const time = timeAt(e);
+    setSelection({ start: Math.min(drag.time, time), end: Math.max(drag.time, time) });
+  };
+
+  const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    if (selection && onLoopChange) onLoopChange(selection);
+    else onSeek(drag.time);
+    setSelection(null);
+    e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+  const shaded = selection ?? loop;
+  const percent = (time: number) => `${(Math.min(duration, Math.max(0, time)) / duration) * 100}%`;
 
   return (
     <div className="card waveform-card">
-      <div ref={wrapRef} className="waveform" style={{ height }} onClick={onClick}>
+      <div
+        ref={wrapRef}
+        className="waveform"
+        style={{ height }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => {
+          dragRef.current = null;
+          setSelection(null);
+        }}
+        title={onLoopChange ? "Tıkla: konuma git · Sürükle: döngü seç" : undefined}
+      >
         <canvas ref={canvasRef} style={{ height }} />
+        {shaded && duration > 0 && (
+          <div
+            className={selection ? "loop-region selecting" : "loop-region"}
+            style={{ left: percent(shaded.start), width: `calc(${percent(shaded.end)} - ${percent(shaded.start)})` }}
+          />
+        )}
         {!peaks && <span className="waveform-status muted">{failed ? "Dalga formu yüklenemedi" : "Dalga formu yükleniyor…"}</span>}
         <div className="playhead-bar" style={{ left: `${progress * 100}%` }} />
       </div>

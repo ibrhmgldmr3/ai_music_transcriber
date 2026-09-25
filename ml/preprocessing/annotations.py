@@ -51,6 +51,97 @@ def load_guitarset_jams(path: str | Path, tuning: Sequence[int] = STANDARD_TUNIN
     return sort_notes(notes)
 
 
+def load_string_midi(
+    path: str | Path,
+    tuning: Sequence[int] = STANDARD_TUNING,
+    string_from: str = "channel",
+) -> list[Note]:
+    """Per-string MIDI from a hexaphonic / MIDI pickup (EGDB, Guitar-TECHS).
+
+    Strings are numbered as guitarists do, 1 = highest: by MIDI channel (0-5) or by
+    track name ("1" ... "6", or "e", "B", "G", "D", "A", "E"), ``string_from`` =
+    "channel" or "track". A note whose pitch can't be played on its string keeps no
+    position rather than a wrong one.
+    """
+    import mido
+
+    midi = mido.MidiFile(str(path))
+    seconds = _tick_to_seconds(midi)
+    notes: list[Note] = []
+    for track in midi.tracks:
+        track_string = _string_number(track.name)
+        tick = 0
+        active: dict[tuple[int, int], tuple[int, int]] = {}  # (channel, pitch) -> (tick, vel)
+        for message in track:
+            tick += message.time
+            if message.type not in ("note_on", "note_off"):
+                continue
+            key = (message.channel, message.note)
+            started = active.pop(key, None)
+            if started is not None and tick > started[0]:
+                number = track_string if string_from == "track" else message.channel + 1
+                notes.append(
+                    _string_note(
+                        message.note, seconds(started[0]), seconds(tick), started[1], number, tuning
+                    )
+                )
+            if message.type == "note_on" and message.velocity > 0:
+                active[key] = (tick, message.velocity)
+    return sort_notes(notes)
+
+
+_STRING_NAMES = ("e", "B", "G", "D", "A", "E")  # standard tuning, string 1 first
+
+
+def _string_number(track_name: str) -> int | None:
+    name = track_name.strip()
+    if name.isdigit():
+        return int(name)
+    return _STRING_NAMES.index(name) + 1 if name in _STRING_NAMES else None
+
+
+def _string_note(
+    pitch: int, start: float, end: float, velocity: int, number: int | None, tuning: Sequence[int]
+) -> Note:
+    string = len(tuning) - number if number is not None else -1
+    fret = pitch - tuning[string] if 0 <= string < len(tuning) else -1
+    placed = fret >= 0
+    return Note(
+        pitch=pitch,
+        start=start,
+        end=end,
+        velocity=velocity,
+        string=string if placed else None,
+        fret=fret if placed else None,
+    )
+
+
+def _tick_to_seconds(midi: Any):
+    """Absolute tick -> seconds under the file's tempo map (tempo events may be on any track)."""
+    import mido
+
+    changes: list[tuple[int, int]] = []
+    for track in midi.tracks:
+        tick = 0
+        for message in track:
+            tick += message.time
+            if message.type == "set_tempo":
+                changes.append((tick, message.tempo))
+    changes.sort()
+    # Seconds elapsed at each tempo change, starting from 120 BPM (MIDI default).
+    points: list[tuple[int, float, int]] = [(0, 0.0, 500000)]
+    for tick, tempo in changes:
+        last_tick, last_seconds, last_tempo = points[-1]
+        elapsed = mido.tick2second(tick - last_tick, midi.ticks_per_beat, last_tempo)
+        points.append((tick, last_seconds + elapsed, tempo))
+
+    def seconds(tick: int) -> float:
+        base = next(p for p in reversed(points) if p[0] <= tick)
+        return base[1] + mido.tick2second(tick - base[0], midi.ticks_per_beat, base[2])
+
+    return seconds
+
+
 def _observations(data: Any) -> list[dict[str, Any]]:
     # JAMS stores observations either as a list of records or as column arrays.
     if isinstance(data, dict):

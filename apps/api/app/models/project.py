@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, String, Text, false
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, Integer, String, Text, false
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
@@ -63,5 +63,9 @@ class Project(Base):
     tempo: Mapped[float | None] = mapped_column(Float, nullable=True)
     tuning: Mapped[list | None] = mapped_column(JSON, nullable=True)
     notes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Notation, set by the user; None means estimated from the notes (music_core.analysis).
+    beats_per_measure: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
+    key_name: Mapped[str | None] = mapped_column(String(16), nullable=True)  # "A minor"
+    downbeat: Mapped[float | None] = mapped_column(Float, nullable=True)  # a bar line (s)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow, onupdate=_utcnow)

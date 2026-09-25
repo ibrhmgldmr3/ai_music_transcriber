@@ -19,6 +19,7 @@ from ml.inference.postprocess import assign_positions_from_tab, decode_notes
 from ml.models import build_model, resolve_device
 from ml.preprocessing.audio import load_audio
 from ml.preprocessing.spectrogram import compute_features
+from music_core.analysis import refine_tempo
 from music_core.notes import Note
 from music_core.tab import assign_tab
 
@@ -161,11 +162,13 @@ class Predictor:
         if separator is not None:
             y = separator(y, sr)
         probs = self.predict_features(compute_features(y, self.cfg))
+        notes = self.decode(probs)
+        tempo = _estimate_tempo(probs, y, sr, audio["hop_length"]) if estimate_tempo else None
+        if tempo is not None:
+            # The bar grid (MusicXML, editor) needs a much finer tempo than the estimate.
+            tempo = round(refine_tempo(notes, tempo), 2)
         return TranscriptionResult(
-            notes=self.decode(probs),
-            duration=len(y) / sr,
-            tempo=_estimate_tempo(probs, y, sr, audio["hop_length"]) if estimate_tempo else None,
-            tuning=self.tuning,
+            notes=notes, duration=len(y) / sr, tempo=tempo, tuning=self.tuning
         )
 
 

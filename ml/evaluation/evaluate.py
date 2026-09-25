@@ -1,6 +1,11 @@
 """Evaluate a checkpoint on a dataset split (never augmented).
 
 python scripts/evaluate.py --checkpoint ml/checkpoints/guitar/best.pt --split test
+
+Other datasets::
+
+    python scripts/evaluate.py --checkpoint ml/checkpoints/guitar/best.pt --split test
+        --set paths.processed_dir=ml/data/processed/egdb paths.splits_dir=ml/data/splits/egdb
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from typing import Any
 import numpy as np
 from tqdm import tqdm
 
-from ml.config import load_config, num_pitches
+from ml.config import apply_overrides, load_config, num_pitches, parse_overrides
 from ml.datasets.dataset import read_split
 from ml.evaluation.metrics import (
     frame_metrics,
@@ -73,8 +78,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--tab-checkpoint", type=Path, help="separate model whose tab head places the notes"
     )
-    parser.add_argument("--split", default="test", choices=["train", "val", "test"])
+    parser.add_argument("--split", default="test", help="train | val | test")
     parser.add_argument("--config", type=Path, help="take data paths from this config instead")
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        nargs="*",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override data paths, e.g. paths.splits_dir=ml/data/splits/egdb",
+    )
     parser.add_argument("--output", type=Path, help="results JSON (default: next to checkpoint)")
     parser.add_argument("--plot", action="store_true", help="save a piano roll of the first track")
     parser.add_argument("--device", default=None)
@@ -83,7 +96,8 @@ def main(argv: list[str] | None = None) -> None:
     predictor = Predictor.from_checkpoint(
         args.checkpoint, device=args.device, tab_checkpoint=args.tab_checkpoint
     )
-    paths = (load_config(args.config) if args.config else predictor.cfg)["paths"]
+    cfg = load_config(args.config) if args.config else predictor.cfg
+    paths = apply_overrides(cfg, parse_overrides(args.overrides))["paths"]
     names = read_split(Path(paths["splits_dir"]) / f"{args.split}.txt")
     if args.split == "train":
         names = [n for n in names if "__" not in n]  # skip offline-augmented variants

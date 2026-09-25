@@ -1,4 +1,6 @@
 import type {
+  Analysis,
+  AnalysisRequest,
   Note,
   NotesUpdate,
   Project,
@@ -36,7 +38,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}/api${path}`, init);
-  } catch {
+  } catch (err) {
+    if (init?.signal?.aborted) throw err;
     throw new ApiError(0, `API'ye ulaşılamadı (${API_URL}).`);
   }
   if (!res.ok) {
@@ -68,14 +71,21 @@ export const retranscribe = (id: string, separateGuitar?: boolean) => {
 };
 export const getTranscription = (id: string) =>
   request<Transcription>(`${projectPath(id)}/transcription`);
-export const saveNotes = (id: string, notes: Note[], tempo?: number | null) => {
-  const body: NotesUpdate = { notes, tempo: tempo ?? null };
+export const saveNotes = (id: string, notes: Note[], notation: Omit<NotesUpdate, "notes"> = {}) => {
+  const body: NotesUpdate = { notes, ...notation };
   return request<Transcription>(`${projectPath(id)}/notes`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 };
+export const analyzeNotes = (body: AnalysisRequest, signal?: AbortSignal) =>
+  request<Analysis>("/analysis", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
 
 /** Upload with progress reporting (fetch cannot report upload progress). */
 export function uploadAudio(

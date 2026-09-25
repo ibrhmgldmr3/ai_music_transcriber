@@ -30,6 +30,7 @@ from app.services.storage import (
     stored_file,
 )
 from app.services.transcription import job_is_stale, run_transcription
+from music_core.analysis import Key, estimate_key
 from music_core.midi import notes_to_midi_bytes
 from music_core.musicxml import notes_to_musicxml
 from music_core.notes import Note
@@ -78,7 +79,14 @@ def _transcription_out(project: Project) -> TranscriptionOut:
         tuning=project.tuning or list(STANDARD_TUNING),
         mean_confidence=sum(confidences) / len(confidences) if confidences else None,
         notes=notes,
+        beats_per_measure=project.beats_per_measure or 4,
+        key=project.key_name,
+        downbeat=project.downbeat,
     )
+
+
+def _chosen_key(project: Project) -> Key | None:
+    return Key.parse(project.key_name) if project.key_name else None
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -199,6 +207,13 @@ def update_notes(
     project.notes = [note.to_dict() for note in notes]
     if payload.tempo is not None:
         project.tempo = round(payload.tempo, 2)
+    if payload.beats_per_measure is not None:
+        project.beats_per_measure = payload.beats_per_measure
+    # An explicit null returns key / bar grid to the estimate; omitted keeps them.
+    if "key" in payload.model_fields_set:
+        project.key_name = payload.key
+    if "downbeat" in payload.model_fields_set:
+        project.downbeat = payload.downbeat
     db.commit()
     return _transcription_out(project)
 
@@ -207,7 +222,12 @@ def update_notes(
 def export_midi(project_id: str, db: Session = Depends(get_db)) -> Response:
     project = _get_project(db, project_id)
     notes = _require_transcription(project)
-    data = notes_to_midi_bytes(notes, tempo=project.tempo or 120.0)
+    data = notes_to_midi_bytes(
+        notes,
+        tempo=project.tempo or 120.0,
+        key=_chosen_key(project) or estimate_key(notes),
+        beats_per_measure=project.beats_per_measure or 4,
+    )
     return Response(data, media_type="audio/midi", headers=_attachment(f"{project.name}.mid"))
 
 
@@ -221,6 +241,9 @@ def export_musicxml(project_id: str, db: Session = Depends(get_db)) -> Response:
         tempo=project.tempo or 120.0,
         tuning=project.tuning or STANDARD_TUNING,
         title=project.name,
+        beats_per_measure=project.beats_per_measure or 4,
+        key=_chosen_key(project),
+        downbeat=project.downbeat,
     )
     return Response(
         data,

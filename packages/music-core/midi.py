@@ -10,6 +10,7 @@ from typing import BinaryIO
 
 import mido
 
+from music_core.analysis import Key
 from music_core.notes import Note, sort_notes
 
 TICKS_PER_BEAT = 480
@@ -26,14 +27,26 @@ def notes_to_midi(
     tempo: float = 120.0,
     program: int = GUITAR_PROGRAM,
     channel: int = 0,
+    key: Key | None = None,
+    beats_per_measure: int = 4,
 ) -> mido.MidiFile:
-    """Build a single-track MIDI file from notes (times in seconds)."""
+    """Build a single-track MIDI file from notes (times in seconds).
+
+    Note times are kept as they are, so the file lines up with the recording; the key
+    and time signature are informational.
+    """
     if not (math.isfinite(tempo) and tempo > 0):
         tempo = 120.0  # an unusable tempo estimate must not break the export
     mid = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
     track = mido.MidiTrack()
     mid.tracks.append(track)
     track.append(mido.MetaMessage("set_tempo", tempo=int(mido.bpm2tempo(tempo)), time=0))
+    track.append(
+        mido.MetaMessage("time_signature", numerator=beats_per_measure, denominator=4, time=0)
+    )
+    if key is not None:
+        name = key.tonic_name + ("m" if key.mode == "minor" else "")
+        track.append(mido.MetaMessage("key_signature", key=name, time=0))
     track.append(mido.Message("program_change", program=program, channel=channel, time=0))
 
     # (tick, order, message): note_off (0) sorts before note_on (1) on the same tick.
@@ -72,9 +85,14 @@ def notes_to_midi_bytes(
     notes: Iterable[Note],
     tempo: float = 120.0,
     program: int = GUITAR_PROGRAM,
+    key: Key | None = None,
+    beats_per_measure: int = 4,
 ) -> bytes:
     buffer = io.BytesIO()
-    notes_to_midi(notes, tempo=tempo, program=program).save(file=buffer)
+    midi = notes_to_midi(
+        notes, tempo=tempo, program=program, key=key, beats_per_measure=beats_per_measure
+    )
+    midi.save(file=buffer)
     return buffer.getvalue()
 
 

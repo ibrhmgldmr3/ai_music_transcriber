@@ -26,6 +26,9 @@ def get_db() -> Iterator[Session]:
 # create_all() only creates missing tables, so existing databases get these via ALTER.
 _ADDED_COLUMNS = [
     ("projects", "separate_guitar", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("projects", "beats_per_measure", "INTEGER NOT NULL DEFAULT 4"),
+    ("projects", "key_name", "VARCHAR(16)"),
+    ("projects", "downbeat", "FLOAT"),
 ]
 
 

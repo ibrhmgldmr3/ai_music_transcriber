@@ -5,6 +5,9 @@ Usage (from the repository root)::
     python scripts/train.py --config ml/configs/guitar.yaml
     python scripts/train.py --config ml/configs/guitar.yaml --set training.epochs=20 model.name=cnn
     python scripts/train.py --config ml/configs/guitar.yaml --resume ml/checkpoints/guitar/last.pt
+
+    # fine-tune: start from a trained model's weights with a fresh optimizer and schedule
+    python scripts/train.py --init ml/checkpoints/guitar/best.pt --set training.lr=2e-4
 """
 
 from __future__ import annotations
@@ -182,6 +185,12 @@ class Trainer:
         self.start_epoch = int(ckpt.get("epoch", 0)) + 1
         logger.info("Resumed from %s (next epoch %d)", path, self.start_epoch)
 
+    def load_weights(self, path: Path) -> None:
+        """Model weights only (fine-tuning); optimizer, schedule and epoch start fresh."""
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        self.model.load_state_dict(ckpt["model"])
+        logger.info("Initialized weights from %s", path)
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Train a transcription model.")
@@ -196,7 +205,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
     parser.add_argument("--resume", type=Path, help="checkpoint to resume from")
+    parser.add_argument(
+        "--init", type=Path, help="start from this checkpoint's weights (fine-tuning)"
+    )
     args = parser.parse_args(argv)
+    if args.resume and args.init:
+        parser.error("--resume and --init are mutually exclusive")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config, parse_overrides(args.overrides))
@@ -252,6 +266,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     if args.resume:
         trainer.load_checkpoint(args.resume)
+    elif args.init:
+        trainer.load_weights(args.init)
     trainer.fit(train_loader, val_loader)
 
 

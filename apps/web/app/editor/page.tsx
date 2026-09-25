@@ -3,14 +3,15 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import type { Note, Project, Transcription } from "@music-transcriber/shared-types";
+import type { Analysis, Note, Project, Transcription } from "@music-transcriber/shared-types";
 import GuitarTab from "@/components/GuitarTab";
 import NoteEditor from "@/components/NoteEditor";
 import PianoRoll from "@/components/PianoRoll";
-import PlaybackControls from "@/components/PlaybackControls";
+import PlaybackControls, { type ListenMode } from "@/components/PlaybackControls";
 import Waveform from "@/components/Waveform";
 import {
   STATUS_LABELS,
+  analyzeNotes,
   audioUrl,
   errorMessage,
   getProject,
@@ -21,13 +22,16 @@ import {
   saveNotes,
   tabUrl,
 } from "@/lib/api";
-import { STANDARD_TUNING, defaultPosition } from "@/lib/music";
+import { KEY_NAMES, STANDARD_TUNING, beatGrid, defaultPosition, formatTime } from "@/lib/music";
 import { useSettings } from "@/lib/settings";
+import { useNotePlayer } from "@/lib/synth";
 import { usePlayback } from "@/lib/usePlayback";
 
-// Same bounds as NotesUpdate.tempo in apps/api/app/schemas/project.py.
+// Same bounds as apps/api/app/schemas/project.py.
 const MIN_TEMPO = 20;
 const MAX_TEMPO = 400;
+const METERS = [2, 3, 4, 5, 6, 7];
+const ANALYSIS_DELAY_MS = 300;
 
 export default function EditorPage() {
   return (
@@ -46,12 +50,31 @@ function Editor() {
   const [transcription, setTranscription] = useState<Transcription | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [tempo, setTempo] = useState<number | null>(null);
+  // Notation chosen by the user; null key / downbeat mean "estimate from the notes".
+  const [beatsPerMeasure, setBeatsPerMeasure] = useState(4);
+  const [keyChoice, setKeyChoice] = useState<string | null>(null);
+  const [downbeatChoice, setDownbeatChoice] = useState<number | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [analysisPending, setAnalysisPending] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [songMode, setSongMode] = useState(false);
+  const [listen, setListen] = useState<ListenMode>("audio");
+  const [metronome, setMetronome] = useState(false);
+
+  const applyTranscription = useCallback((t: Transcription) => {
+    setTranscription(t);
+    setNotes(t.notes);
+    setTempo(t.tempo);
+    setBeatsPerMeasure(t.beats_per_measure);
+    setKeyChoice(t.key);
+    setDownbeatChoice(t.downbeat);
+    setDirty(false);
+  }, []);
 
   // Load the project and poll until the transcription is finished.
   useEffect(() => {
@@ -67,11 +90,8 @@ function Editor() {
         if (p.status === "completed") {
           const t = await getTranscription(id);
           if (cancelled) return;
-          setTranscription(t);
-          setNotes(t.notes);
-          setTempo(t.tempo);
+          applyTranscription(t);
           setSelected(null);
-          setDirty(false);
         } else if (p.status === "pending" || p.status === "processing") {
           timer = setTimeout(load, 2000);
         }
@@ -84,7 +104,34 @@ function Editor() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [id, reloadKey]);
+  }, [id, reloadKey, applyTranscription]);
+
+  // Key, bar grid and chords follow every edit (debounced; stale requests are aborted).
+  useEffect(() => {
+    if (!transcription) return;
+    const controller = new AbortController();
+    setAnalysisPending(true);
+    const timer = setTimeout(() => {
+      analyzeNotes(
+        { notes, tempo, beats_per_measure: beatsPerMeasure, key: keyChoice, downbeat: downbeatChoice },
+        controller.signal,
+      )
+        .then((result) => {
+          setAnalysis(result);
+          setAnalysisError(null);
+          setAnalysisPending(false);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          setAnalysisError(errorMessage(err));
+          setAnalysisPending(false);
+        });
+    }, ANALYSIS_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [transcription, notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice]);
 
   // Warn before leaving with unsaved edits.
   useEffect(() => {
@@ -103,6 +150,26 @@ function Editor() {
     const values = notes.map((n) => n.confidence).filter((c): c is number => c !== null);
     return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
   }, [notes]);
+  const grid = useMemo(() => {
+    if (!analysis) return null;
+    const firstNote = notes.reduce((min, n) => Math.min(min, n.start), Infinity);
+    return beatGrid(
+      analysis.tempo,
+      analysis.beats_per_measure,
+      analysis.downbeat,
+      Number.isFinite(firstNote) ? firstNote : 0,
+      duration,
+    );
+  }, [analysis, notes, duration]);
+  const clicks = useMemo(
+    () => (metronome && grid ? { beats: grid.beats, bars: grid.bars.map((b) => b.time) } : null),
+    [metronome, grid],
+  );
+  const musicKey = analysis?.key ?? null;
+
+  const { setMuted } = playback;
+  useEffect(() => setMuted(listen === "notes"), [listen, setMuted]);
+  useNotePlayer({ audio: playback.audio, playing: playback.playing, notes, synth: listen !== "audio", clicks });
 
   const updateNote = useCallback(
     (note: Note) => {
@@ -137,16 +204,31 @@ function Editor() {
     setDirty(true);
   };
 
+  const editNotation = (change: () => void) => {
+    change();
+    setDirty(true);
+  };
+
+  /** The selected note's onset (else the playhead) becomes beat 1 of a bar. */
+  const markDownbeat = () => {
+    const note = selected !== null ? notes[selected] : undefined;
+    const time = note ? note.start : playback.currentTime;
+    editNotation(() => setDownbeatChoice(Math.round(time * 1000) / 1000));
+  };
+
   const save = async () => {
     if (!id) return;
     setSaving(true);
     setError(null);
     try {
-      const t = await saveNotes(id, notes, tempo);
-      setTranscription(t);
-      setNotes(t.notes);
-      setTempo(t.tempo);
-      setDirty(false);
+      applyTranscription(
+        await saveNotes(id, notes, {
+          tempo,
+          beats_per_measure: beatsPerMeasure,
+          key: keyChoice,
+          downbeat: downbeatChoice,
+        }),
+      );
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -160,6 +242,7 @@ function Editor() {
     try {
       setProject(await retranscribe(id, songMode));
       setTranscription(null);
+      setAnalysis(null);
       setNotes([]);
       setSelected(null);
       setDirty(false);
@@ -169,12 +252,24 @@ function Editor() {
     }
   };
 
-  // Space: play/pause · Delete/Backspace: remove selected note · Esc: deselect.
-  const { toggle } = playback;
+  // Read the position from the element so these (and the key handler) stay stable while playing.
+  const { toggle, setLoop, loop, audio } = playback;
+  const loopFromHere = useCallback(() => {
+    const now = audio?.currentTime ?? 0;
+    setLoop({ start: now, end: loop && loop.end > now ? loop.end : duration });
+  }, [audio, loop, duration, setLoop]);
+  const loopUntilHere = useCallback(() => {
+    const now = audio?.currentTime ?? 0;
+    setLoop({ start: loop && loop.start < now ? loop.start : 0, end: now });
+  }, [audio, loop, setLoop]);
+
+  // Space: play/pause · Delete/Backspace: remove note · Esc: deselect · A/B/L: loop · M: metronome.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
       if (e.code === "Space") {
         e.preventDefault();
         toggle();
@@ -183,11 +278,19 @@ function Editor() {
         deleteSelected();
       } else if (e.key === "Escape") {
         setSelected(null);
+      } else if (key === "a") {
+        loopFromHere();
+      } else if (key === "b") {
+        loopUntilHere();
+      } else if (key === "l") {
+        setLoop(null);
+      } else if (key === "m") {
+        setMetronome((on) => !on);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggle, deleteSelected, selected]);
+  }, [toggle, deleteSelected, selected, loopFromHere, loopUntilHere, setLoop]);
 
   if (!id) {
     return (
@@ -253,6 +356,8 @@ function Editor() {
         currentTime={playback.currentTime}
         duration={playback.duration || duration}
         onSeek={playback.seek}
+        loop={loop}
+        onLoopChange={setLoop}
       />
       <PlaybackControls
         playing={playback.playing}
@@ -262,6 +367,14 @@ function Editor() {
         onToggle={toggle}
         onSeek={playback.seek}
         onRateChange={playback.setRate}
+        listen={listen}
+        onListenChange={setListen}
+        metronome={metronome}
+        onMetronomeChange={setMetronome}
+        loop={loop}
+        onLoopStart={loopFromHere}
+        onLoopEnd={loopUntilHere}
+        onLoopClear={() => setLoop(null)}
       />
 
       {transcription && (
@@ -279,6 +392,10 @@ function Editor() {
                   onSelect={setSelected}
                   onSeek={playback.seek}
                   follow={settings.followPlayhead}
+                  grid={grid}
+                  chords={analysis?.chords}
+                  chordsStale={analysisPending}
+                  loop={loop}
                 />
               )}
               {settings.showPianoRoll && (
@@ -291,13 +408,20 @@ function Editor() {
                   onSelect={setSelected}
                   onSeek={playback.seek}
                   follow={settings.followPlayhead}
+                  grid={grid}
+                  loop={loop}
+                  musicKey={musicKey}
                 />
               )}
-              <p className="muted small">Boşluk: oynat/duraklat · Delete: seçili notayı sil · Esc: seçimi kaldır</p>
+              <p className="muted small">
+                Boşluk: oynat/duraklat · Delete: seçili notayı sil · Esc: seçimi kaldır · A / B: döngü başı / sonu ·
+                L: döngüyü kaldır · M: metronom
+              </p>
             </div>
             <NoteEditor
               note={selected !== null ? notes[selected] ?? null : null}
               tuning={tuning}
+              musicKey={musicKey}
               onChange={updateNote}
               onDelete={deleteSelected}
             />
@@ -312,7 +436,7 @@ function Editor() {
             </span>
             <label
               className="row compact"
-              title="Tahmini tempo. Yanlışsa düzeltin: MIDI ve MusicXML ritmi bu tempoya göre yazılır."
+              title="Tahmini tempo. Yanlışsa düzeltin: vuruş ızgarası, metronom, MIDI ve MusicXML ritmi bu tempoya göre."
             >
               BPM:
               <input
@@ -320,16 +444,57 @@ function Editor() {
                 type="number"
                 min={MIN_TEMPO}
                 max={MAX_TEMPO}
-                step={1}
-                value={tempo !== null ? Math.round(tempo) : ""}
+                step={0.1}
+                value={tempo !== null ? Math.round(tempo * 10) / 10 : ""}
                 onChange={(e) => {
                   const value = e.target.valueAsNumber;
                   if (Number.isNaN(value) || value < MIN_TEMPO || value > MAX_TEMPO) return;
-                  setTempo(value);
-                  setDirty(true);
+                  editNotation(() => setTempo(value));
                 }}
               />
             </label>
+            <label className="row compact" title="Ölçüdeki vuruş sayısı (dörtlük vuruş)">
+              Ölçü:
+              <select
+                value={beatsPerMeasure}
+                onChange={(e) => editNotation(() => setBeatsPerMeasure(Number(e.target.value)))}
+              >
+                {METERS.map((beats) => (
+                  <option key={beats} value={beats}>
+                    {beats}/4
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="row compact" title="Armür, nota ve akor isimleri bu tona göre yazılır">
+              Ton:
+              <select
+                className="notation-select"
+                value={keyChoice ?? ""}
+                onChange={(e) => editNotation(() => setKeyChoice(e.target.value || null))}
+              >
+                <option value="">Otomatik{analysis?.estimated_key ? ` (${analysis.estimated_key.name})` : ""}</option>
+                {KEY_NAMES.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="row compact">
+              Ölçü başı:{" "}
+              <strong>{downbeatChoice !== null ? formatTime(downbeatChoice) : "otomatik"}</strong>
+              <button
+                onClick={markDownbeat}
+                title="Seçili notanın başlangıcını (seçim yoksa oynatma konumunu) ölçünün 1. vuruşu yapar"
+              >
+                {selected !== null ? "Seçili nota 1. vuruş" : "Buradan başlat"}
+              </button>
+              {downbeatChoice !== null && (
+                <button onClick={() => editNotation(() => setDownbeatChoice(null))}>Otomatik</button>
+              )}
+            </span>
+            {analysisError && <span className="error small">Analiz yapılamadı: {analysisError}</span>}
           </div>
         </>
       )}

@@ -1,14 +1,30 @@
 # Keep in sync with packages/shared-types/index.ts.
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
 from app.models.project import ProjectStatus
+from music_core.analysis import KEY_NAMES
 
 MAX_NOTE_SECONDS = 6 * 3600.0  # far beyond max_audio_minutes; bounds MIDI/tab export sizes
 MAX_STRINGS = 12
 MAX_FRET = 36
+MIN_TEMPO, MAX_TEMPO = 20, 400
+MIN_BEATS, MAX_BEATS = 2, 7  # beats per measure (quarter-note beats)
+
+
+def _known_key(value: str | None) -> str | None:
+    if value is not None and value not in KEY_NAMES:
+        raise ValueError(f"unknown key; expected one of: {', '.join(KEY_NAMES)}")
+    return value
+
+
+KeyName = Annotated[str | None, AfterValidator(_known_key)]
+Tempo = Annotated[float | None, Field(ge=MIN_TEMPO, le=MAX_TEMPO)]
+BeatsPerMeasure = Annotated[int, Field(ge=MIN_BEATS, le=MAX_BEATS)]
+Downbeat = Annotated[float | None, Field(ge=0, le=MAX_NOTE_SECONDS)]
 
 
 class NoteSchema(BaseModel):
@@ -52,11 +68,56 @@ class TranscriptionOut(BaseModel):
     tuning: list[int]
     mean_confidence: float | None
     notes: list[NoteSchema]
+    # Notation chosen by the user; null key/downbeat mean "estimate from the notes".
+    beats_per_measure: int
+    key: str | None
+    downbeat: float | None
 
 
 class NotesUpdate(BaseModel):
+    """The editor's notes plus notation corrections.
+
+    Omitted fields keep their stored value; ``key``/``downbeat`` set to null go back to
+    the estimate.
+    """
+
     model_config = ConfigDict(allow_inf_nan=False)
 
     notes: list[NoteSchema] = Field(max_length=settings.max_notes)
     # Corrected tempo (BPM); the estimate can be off, and exports quantize to it.
-    tempo: float | None = Field(default=None, ge=20, le=400)
+    tempo: Tempo = None
+    beats_per_measure: BeatsPerMeasure | None = None
+    key: KeyName = None
+    downbeat: Downbeat = None
+
+
+class AnalysisRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    notes: list[NoteSchema] = Field(max_length=settings.max_notes)
+    tempo: Tempo = None
+    beats_per_measure: BeatsPerMeasure = 4
+    key: KeyName = None  # null: estimate
+    downbeat: Downbeat = None  # null: estimate
+
+
+class KeyOut(BaseModel):
+    name: str  # "Bb major"
+    tonic: int  # pitch class, 0 = C
+    mode: str  # "major" | "minor"
+    fifths: int  # key signature: sharps > 0, flats < 0
+
+
+class ChordOut(BaseModel):
+    start: float
+    end: float
+    label: str  # "F#m7", "D/F#"
+
+
+class AnalysisOut(BaseModel):
+    tempo: float
+    beats_per_measure: int
+    downbeat: float  # a bar line in [0, bar length); bar lines repeat every bar
+    key: KeyOut | None  # the chosen key, else the estimate
+    estimated_key: KeyOut | None
+    chords: list[ChordOut]

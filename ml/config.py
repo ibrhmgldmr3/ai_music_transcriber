@@ -23,10 +23,12 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 def load_config(path: str | Path, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
     """Load a YAML config. ``extends: other.yaml`` is resolved relative to the file."""
-    cfg = _load_with_parents(Path(path), chain=())
-    if overrides:
-        cfg = _deep_merge(cfg, overrides)
-    return cfg
+    return apply_overrides(_load_with_parents(Path(path), chain=()), overrides)
+
+
+def apply_overrides(cfg: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
+    """A copy of ``cfg`` with nested ``overrides`` (from ``parse_overrides``) merged in."""
+    return _deep_merge(cfg, overrides) if overrides else cfg
 
 
 def _load_with_parents(path: Path, chain: tuple[Path, ...]) -> dict[str, Any]:

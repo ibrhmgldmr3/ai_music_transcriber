@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useRef, type MouseEvent } from "react";
-import type { Note } from "@music-transcriber/shared-types";
-import { playablePositions, stringLabels } from "@/lib/music";
-import { useFollowPlayhead } from "@/lib/usePlayback";
+import type { ChordSymbol, Note } from "@music-transcriber/shared-types";
+import { playablePositions, stringLabels, type BeatGrid } from "@/lib/music";
+import { useFollowPlayhead, type LoopRange } from "@/lib/usePlayback";
 
 const SPACING = 22;
 const PAD = 16;
 const LABEL_WIDTH = 32;
+const HEADER = 30; // bar numbers and chord symbols above the strings
 
 interface GuitarTabProps {
   notes: Note[];
@@ -19,6 +20,11 @@ interface GuitarTabProps {
   onSelect: (index: number | null) => void;
   onSeek?: (time: number) => void;
   follow?: boolean;
+  grid?: BeatGrid | null;
+  chords?: ChordSymbol[];
+  /** Chords from before the latest edit, while the new analysis is on its way. */
+  chordsStale?: boolean;
+  loop?: LoopRange | null;
 }
 
 /** Tablature with the highest string on top; one fret number per note at its onset. */
@@ -32,15 +38,21 @@ export default function GuitarTab({
   onSelect,
   onSeek,
   follow = true,
+  grid = null,
+  chords = [],
+  chordsStale = false,
+  loop = null,
 }: GuitarTabProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useFollowPlayhead(scrollRef, currentTime, pixelsPerSecond, follow);
 
   const strings = tuning.length;
-  const height = PAD * 2 + Math.max(0, strings - 1) * SPACING;
+  const height = HEADER + PAD * 2 + Math.max(0, strings - 1) * SPACING;
   const width = Math.max(1, Math.ceil(duration * pixelsPerSecond)) + 24;
   const labels = useMemo(() => stringLabels(tuning), [tuning]);
-  const lineY = (string: number) => PAD + (strings - 1 - string) * SPACING;
+  const lineY = (string: number) => HEADER + PAD + (strings - 1 - string) * SPACING;
+  const top = lineY(strings - 1);
+  const bottom = lineY(0);
 
   // Unplaced notes are either outside the guitar's range or simply not assigned yet
   // (the server's optimizer places those on save).
@@ -55,7 +67,7 @@ export default function GuitarTab({
       notes.map((n, i) => {
         if (n.string === null || n.fret === null || n.string < 0 || n.string >= strings) return null;
         const x = n.start * pixelsPerSecond;
-        const y = PAD + (strings - 1 - n.string) * SPACING;
+        const y = HEADER + PAD + (strings - 1 - n.string) * SPACING;
         const label = String(n.fret);
         return (
           <g
@@ -74,6 +86,40 @@ export default function GuitarTab({
         );
       }),
     [notes, pixelsPerSecond, selectedIndex, onSelect, strings],
+  );
+
+  const gridLines = useMemo(() => {
+    if (!grid) return null;
+    return (
+      <g>
+        {grid.beats.map((t) => (
+          <line key={`b${t}`} x1={t * pixelsPerSecond} x2={t * pixelsPerSecond} y1={top} y2={bottom} className="grid-beat" />
+        ))}
+        {grid.bars.map(({ time, number }) => (
+          <g key={`m${time}`}>
+            <line x1={time * pixelsPerSecond} x2={time * pixelsPerSecond} y1={top} y2={bottom} className="grid-bar" />
+            {number > 0 && (
+              <text x={time * pixelsPerSecond + 3} y={10} className="bar-number">
+                {number}
+              </text>
+            )}
+          </g>
+        ))}
+      </g>
+    );
+  }, [grid, pixelsPerSecond, top, bottom]);
+
+  const chordLabels = useMemo(
+    () => (
+      <g className={chordsStale ? "chord-lane stale" : "chord-lane"}>
+        {chords.map((c) => (
+          <text key={`${c.start}-${c.label}`} x={c.start * pixelsPerSecond + 3} y={24}>
+            {c.label}
+          </text>
+        ))}
+      </g>
+    ),
+    [chords, chordsStale, pixelsPerSecond],
   );
 
   const onBackgroundClick = (e: MouseEvent<SVGSVGElement>) => {
@@ -97,6 +143,17 @@ export default function GuitarTab({
         </svg>
         <div className="timeline-scroll" ref={scrollRef}>
           <svg width={width} height={height} onClick={onBackgroundClick}>
+            {loop && (
+              <rect
+                x={loop.start * pixelsPerSecond}
+                width={(loop.end - loop.start) * pixelsPerSecond}
+                y={0}
+                height={height}
+                className="loop-shade"
+              />
+            )}
+            {gridLines}
+            {chordLabels}
             {tuning.map((_, s) => (
               <line key={s} x1={0} x2={width} y1={lineY(s)} y2={lineY(s)} className="tab-line" />
             ))}

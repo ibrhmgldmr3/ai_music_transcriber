@@ -1,0 +1,23 @@
+# Tab-head model (see guitar_tab.yaml) on GuitarSet + EGDB + Guitar-TECHS. EGDB's
+# quantized note timing hurts note detection but not the per-frame string/fret targets,
+# and its electric guitar through six amplifiers is where positions improved most.
+#
+#   python scripts/prepare_dataset.py --dataset egdb
+#   python scripts/mix_splits.py --out ml/data/splits/mixed_tab \
+#       guitarset=ml/data/splits/guitarset_fx egdb=ml/data/splits/egdb \
+#       guitar_techs=ml/data/splits/guitar_techs
+#
+# guitar_v7 = guitar_v5 fine-tuned on this mix for 30 epochs:
+#   python scripts/train.py --config ml/configs/guitar_tab_mixed.yaml \
+#       --init ml/checkpoints/guitar_v5/best.pt --set training.lr=2e-4 training.epochs=30
+extends: guitar_tab.yaml
+
+paths:
+  processed_dir: ml/data/processed
+  splits_dir: ml/data/splits/mixed_tab
+  checkpoint_dir: ml/checkpoints/guitar_tab_mixed
+
+training:
+  repeats: 1
+  preload: false
+  num_workers: 3

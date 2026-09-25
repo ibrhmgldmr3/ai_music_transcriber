@@ -183,6 +183,63 @@ def test_corrected_tempo_is_saved_and_used_by_exports(client):
         assert r.status_code == 422
 
 
+def test_notation_settings_are_saved_and_used_by_exports(client):
+    import mido
+
+    pid = upload(client, wav_bytes()).json()["id"]
+    notes = [{"pitch": 65, "start": 0.0, "end": 0.5}, {"pitch": 70, "start": 0.5, "end": 1.0}]
+    body = {"notes": notes, "beats_per_measure": 3, "key": "F major", "downbeat": 0.5}
+    saved = client.put(f"/api/projects/{pid}/notes", json=body).json()
+    assert (saved["beats_per_measure"], saved["key"], saved["downbeat"]) == (3, "F major", 0.5)
+    score = client.get(f"/api/projects/{pid}/musicxml").text
+    assert "<beats>3</beats>" in score and "<fifths>-1</fifths>" in score
+    midi = mido.MidiFile(file=io.BytesIO(client.get(f"/api/projects/{pid}/midi").content))
+    metas = {m.type: m for m in midi.tracks[0] if m.is_meta}
+    assert metas["time_signature"].numerator == 3 and metas["key_signature"].key == "F"
+
+    # Omitted fields are kept; an explicit null goes back to the estimate.
+    kept = client.put(f"/api/projects/{pid}/notes", json={"notes": notes}).json()
+    assert (kept["beats_per_measure"], kept["key"], kept["downbeat"]) == (3, "F major", 0.5)
+    reset = client.put(
+        f"/api/projects/{pid}/notes", json={"notes": notes, "key": None, "downbeat": None}
+    ).json()
+    assert (reset["key"], reset["downbeat"]) == (None, None)
+
+    for bad in ({"key": "H major"}, {"beats_per_measure": 1}, {"downbeat": -1}):
+        r = client.put(f"/api/projects/{pid}/notes", json={"notes": notes, **bad})
+        assert r.status_code == 422, bad
+
+
+def test_analysis_of_unsaved_notes(client):
+    c_major, g_major = [48, 52, 55, 60], [43, 47, 50, 55]
+    notes = [
+        {"pitch": p, "start": beat * 0.5, "end": beat * 0.5 + 0.45}
+        for beat in range(8)
+        for p in (c_major if beat < 4 else g_major)
+    ]
+    r = client.post("/api/analysis", json={"notes": notes, "tempo": 120})
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert [c["label"] for c in result["chords"]] == ["C", "G"]
+    assert result["key"]["name"] in ("C major", "G major")
+    assert result["tempo"] == 120 and result["beats_per_measure"] == 4
+
+    chosen = client.post(
+        "/api/analysis", json={"notes": notes, "tempo": 120, "key": "E minor", "downbeat": 0.5}
+    ).json()
+    assert chosen["key"] == {"name": "E minor", "tonic": 4, "mode": "minor", "fifths": 1}
+    assert chosen["downbeat"] == 0.5 and chosen["estimated_key"] == result["key"]
+
+    for bad in ({"tempo": 5}, {"key": "C dorian"}, {"beats_per_measure": 12}):
+        assert client.post("/api/analysis", json={"notes": notes, **bad}).status_code == 422
+    too_many = [notes[0]] * 51
+    assert client.post("/api/analysis", json={"notes": too_many}).status_code == 422
+    cross_site = client.post(
+        "/api/analysis", json={"notes": notes}, headers={"Origin": "https://evil.example"}
+    )
+    assert cross_site.status_code == 403
+
+
 def test_note_count_is_limited(client):
     pid = upload(client, wav_bytes()).json()["id"]
     notes = [{"pitch": 60, "start": 0.0, "end": 1.0}] * 51
@@ -337,8 +394,12 @@ def test_existing_database_gets_new_columns(client):
     from app.models.database import engine, init_db
 
     pid = upload(client, wav_bytes()).json()["id"]
-    with engine.begin() as connection:  # simulate a database from before song mode
-        connection.execute(text("ALTER TABLE projects DROP COLUMN separate_guitar"))
-    assert "separate_guitar" not in {c["name"] for c in inspect(engine).get_columns("projects")}
+    added = ("separate_guitar", "beats_per_measure", "key_name", "downbeat")
+    with engine.begin() as connection:  # simulate a database from the first release
+        for column in added:
+            connection.execute(text(f"ALTER TABLE projects DROP COLUMN {column}"))
+    assert not set(added) & {c["name"] for c in inspect(engine).get_columns("projects")}
     init_db()
     assert client.get(f"/api/projects/{pid}").json()["separate_guitar"] is False
+    transcription = client.get(f"/api/projects/{pid}/transcription").json()
+    assert (transcription["beats_per_measure"], transcription["key"]) == (4, None)

@@ -15,6 +15,34 @@ from ml.preprocessing.augmentation import FeatureAugmenter
 TARGET_KEYS = ("onset", "frame", "offset", "tab")
 
 
+def split_into_parts(
+    track: dict[str, np.ndarray], part_frames: int, frame_rate: float
+) -> list[dict[str, np.ndarray]]:
+    """Cut a preprocessed track into consecutive pieces of about ``part_frames`` frames.
+
+    Targets are sliced, not recomputed, so a note crossing a cut keeps its single onset in
+    the piece where it starts. Reference notes go to the piece they start in.
+    """
+    n_frames = track["features"].shape[1]
+    n_parts = max(1, round(n_frames / part_frames))
+    bounds = np.linspace(0, n_frames, n_parts + 1).round().astype(int)
+    parts = []
+    for start, end in zip(bounds[:-1], bounds[1:]):
+        part = {"features": track["features"][:, start:end]}
+        for key in TARGET_KEYS:
+            if key in track:
+                part[key] = track[key][start:end]
+        if "notes" in track:
+            notes = track["notes"].copy()  # columns: pitch, start, end, velocity, string, fret
+            t0, t1 = start / frame_rate, end / frame_rate
+            notes = notes[(notes[:, 1] >= t0) & (notes[:, 1] < t1)]
+            notes[:, 1] -= t0
+            notes[:, 2] = np.minimum(notes[:, 2] - t0, t1 - t0)
+            part["notes"] = notes
+        parts.append(part)
+    return parts
+
+
 def read_split(path: str | Path) -> list[str]:
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     return [line.strip() for line in lines if line.strip()]

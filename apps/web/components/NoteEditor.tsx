@@ -1,12 +1,14 @@
 "use client";
 
-import type { Note } from "@music-transcriber/shared-types";
+import type { MusicKey, Note } from "@music-transcriber/shared-types";
 import { MAX_FRET, clamp, defaultPosition, midiToName, stringLabels } from "@/lib/music";
 
 interface NoteEditorProps {
   note: Note | null;
   tuning: number[];
   maxFret?: number;
+  /** Spells the note name (Bb rather than A# in F major). */
+  musicKey?: MusicKey | null;
   onChange: (note: Note) => void;
   onDelete: () => void;
 }
@@ -18,7 +20,14 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
  * the pitch; changing the pitch moves the fret, or the string if the current one can't
  * play it. Choosing "—" as the string lets the optimizer pick a position on save.
  */
-export default function NoteEditor({ note: selected, tuning, maxFret = MAX_FRET, onChange, onDelete }: NoteEditorProps) {
+export default function NoteEditor({
+  note: selected,
+  tuning,
+  maxFret = MAX_FRET,
+  musicKey = null,
+  onChange,
+  onDelete,
+}: NoteEditorProps) {
   if (!selected) {
     return (
       <aside className="card note-editor">
@@ -76,7 +85,7 @@ export default function NoteEditor({ note: selected, tuning, maxFret = MAX_FRET,
   return (
     <aside className="card note-editor stack">
       <div className="row between">
-        <h3>Nota: {midiToName(note.pitch)}</h3>
+        <h3>Nota: {midiToName(note.pitch, musicKey)}</h3>
         <button className="danger" onClick={onDelete}>
           Sil
         </button>
