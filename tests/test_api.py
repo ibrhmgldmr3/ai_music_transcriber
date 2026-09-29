@@ -42,11 +42,14 @@ TUNING = [40, 45, 50, 55, 59, 64]
 
 class FakePredictor:
     calls: list = []  # separator passed to each transcription
+    tunings: list = []  # open strings asked for
 
-    def transcribe(self, path, separator=None):
+    def transcribe(self, path, separator=None, tuning=None, progress=None):
         FakePredictor.calls.append(separator)
-        note = Note(64, 0.1, 0.4, string=5, fret=0, confidence=0.9)
-        return TranscriptionResult([note], duration=0.5, tempo=120.0, tuning=TUNING)
+        FakePredictor.tunings.append(tuning)
+        open_strings = list(tuning or TUNING)
+        note = Note(open_strings[5], 0.1, 0.4, string=5, fret=0, confidence=0.9)
+        return TranscriptionResult([note], duration=0.5, tempo=120.0, tuning=open_strings)
 
 
 def wav_bytes(seconds: float = 0.5, sr: int = 8000) -> bytes:
@@ -274,6 +277,81 @@ def test_model_version_follows_the_checkpoint_file(tmp_path, monkeypatch):
         transcription.model_version.cache_clear()
 
 
+def test_tuning_and_capo_reach_the_model_and_the_exports(client):
+    r = client.post(
+        "/api/projects",
+        files={"file": ("take.wav", wav_bytes(), "audio/wav")},
+        data={"tuning": "drop_d", "capo": "2"},
+    )
+    pid = r.json()["id"]
+    assert (r.json()["tuning_name"], r.json()["capo"]) == ("drop_d", 2)
+    assert FakePredictor.tunings[-1] == (40, 47, 52, 57, 61, 66)  # Drop D, capo 2
+    transcription = client.get(f"/api/projects/{pid}/transcription").json()
+    assert transcription["tuning"] == [40, 47, 52, 57, 61, 66]
+    assert (transcription["tuning_name"], transcription["capo"]) == ("drop_d", 2)
+    assert client.get(f"/api/projects/{pid}/tab").text.startswith("Capo 2")
+    assert "<words>Capo 2</words>" in client.get(f"/api/projects/{pid}/musicxml").text
+
+    # Changing them re-transcribes with the new strings; nonsense is refused.
+    client.post(f"/api/projects/{pid}/retranscribe?tuning=standard&capo=0")
+    assert FakePredictor.tunings[-1] == (40, 45, 50, 55, 59, 64)
+    for bad in ("tuning=bach", "capo=13", "capo=-1"):
+        assert client.post(f"/api/projects/{pid}/retranscribe?{bad}").status_code == 422
+    bad_upload = client.post(
+        "/api/projects", files={"file": ("t.wav", wav_bytes(), "audio/wav")}, data={"capo": "20"}
+    )
+    assert bad_upload.status_code == 422
+
+
+def test_progress_is_visible_while_transcribing(client, monkeypatch):
+    seen = {}
+
+    class ReportingPredictor(FakePredictor):
+        def transcribe(self, path, separator=None, tuning=None, progress=None):
+            progress(0.4, "transcribing")
+            seen.update(client.get(f"/api/projects/{holder['id']}").json())
+            return super().transcribe(path, separator, tuning)
+
+    holder = {}
+    monkeypatch.setattr(transcription, "get_predictor", lambda: ReportingPredictor())
+    import app.api.routes as routes
+
+    monkeypatch.setattr(
+        routes, "run_transcription", _deferred(transcription.run_transcription, holder)
+    )
+    pid = upload(client, wav_bytes()).json()["id"]
+    holder["id"] = pid
+    holder["run"]()
+    assert (seen["status"], seen["progress"], seen["stage"]) == ("processing", 0.4, "transcribing")
+    done = client.get(f"/api/projects/{pid}").json()
+    assert (done["status"], done["progress"], done["stage"]) == ("completed", None, None)
+
+
+def _deferred(run, holder):
+    """Replace the background job with one the test starts once it knows the project id."""
+
+    def schedule(project_id):
+        holder["run"] = lambda: run(project_id)
+
+    return schedule
+
+
+def test_render_musicxml_of_unsaved_notes(client):
+    body = {
+        "notes": [{"pitch": 66, "start": 0.0, "end": 0.5, "string": 5, "fret": 0}],
+        "tempo": 100,
+        "tuning": [42, 47, 52, 57, 61, 66],  # standard with capo 2
+        "capo": 2,
+        "title": "<b>Deneme</b>",
+    }
+    r = client.post("/api/render/musicxml", json=body)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.recordare.musicxml+xml")
+    assert "<words>Capo 2</words>" in r.text and "<b>" not in r.text
+    for bad in ({"tuning": [40, 45]}, {"capo": 13}, {"tuning": [40, 45, 50, 55, 59, 300]}):
+        assert client.post("/api/render/musicxml", json={**body, **bad}).status_code == 422
+
+
 def test_note_count_is_limited(client):
     pid = upload(client, wav_bytes()).json()["id"]
     notes = [{"pitch": 60, "start": 0.0, "end": 1.0}] * 51
@@ -317,9 +395,9 @@ def test_stuck_job_can_be_restarted_only_after_timeout(client):
 
 def test_deleted_project_during_transcription_is_skipped(client, monkeypatch):
     class DeletingPredictor(FakePredictor):
-        def transcribe(self, path, separator=None):
+        def transcribe(self, path, separator=None, tuning=None, progress=None):
             client.delete(f"/api/projects/{holder['id']}")
-            return super().transcribe(path, separator)
+            return super().transcribe(path, separator, tuning)
 
     holder = {}
     pid = upload(client, wav_bytes()).json()["id"]
@@ -377,8 +455,55 @@ def test_sanitize_filename():
     assert sanitize_filename("a\x00b\nc.wav") == "abc.wav"
 
 
-def fake_separator(y, sample_rate):
+def fake_separator(y, sample_rate, stem="guitar"):
+    fake_separator.stems.append(stem)
     return y
+
+
+fake_separator.stems = []
+
+
+def test_voice_recordings_are_transcribed_without_the_guitar_model(client):
+    from ml.inference.voice import VOICE_VERSION
+
+    FakePredictor.calls.clear()
+    r = client.post(
+        "/api/projects",
+        files={"file": ("hum.wav", wav_bytes(seconds=1.0), "audio/wav")},
+        data={"source": "voice", "tuning": "drop_d"},
+    )
+    assert r.status_code == 201, r.text
+    project = client.get(f"/api/projects/{r.json()['id']}").json()
+    assert (project["source"], project["status"]) == ("voice", "completed")
+    assert project["model_version"] == VOICE_VERSION
+    assert FakePredictor.calls == []  # the guitar model never ran
+    transcription = client.get(f"/api/projects/{project['id']}/transcription").json()
+    [note] = transcription["notes"]  # the 330 Hz tone is an E4
+    assert note["pitch"] == 64 and note["string"] is not None
+    assert transcription["tuning"] == [38, 45, 50, 55, 59, 64]
+    assert transcription["transpose"] == 0
+    assert client.get("/api/models").json()["voice_version"] == VOICE_VERSION
+
+
+def test_retranscribe_can_switch_between_guitar_and_voice(client, monkeypatch):
+    monkeypatch.setattr(transcription, "get_separator", lambda: fake_separator)
+    pid = upload(client, wav_bytes()).json()["id"]
+    FakePredictor.calls.clear()
+    fake_separator.stems.clear()
+    voice = client.post(f"/api/projects/{pid}/retranscribe?source=voice&separate_guitar=true")
+    assert voice.json()["source"] == "voice"
+    assert fake_separator.stems == ["vocals"]  # song mode isolates the singer
+    assert client.post(f"/api/projects/{pid}/retranscribe?source=guitar").json()["source"] == (
+        "guitar"
+    )
+    assert FakePredictor.calls == [fake_separator]  # the guitar model gets the guitar stem
+    assert client.post(f"/api/projects/{pid}/retranscribe?source=drums").status_code == 422
+    bad = client.post(
+        "/api/projects",
+        files={"file": ("take.wav", wav_bytes(), "audio/wav")},
+        data={"source": "piano"},
+    )
+    assert bad.status_code == 422
 
 
 def test_song_mode_separates_the_guitar_first(client, monkeypatch):
@@ -435,12 +560,20 @@ def test_existing_database_gets_new_columns(client):
         "downbeat",
         "model_version",
         "edited",
+        "tuning_name",
+        "capo",
+        "progress",
+        "stage",
+        "source",
+        "transpose",
     )
     with engine.begin() as connection:  # simulate a database from the first release
         for column in added:
             connection.execute(text(f"ALTER TABLE projects DROP COLUMN {column}"))
     assert not set(added) & {c["name"] for c in inspect(engine).get_columns("projects")}
     init_db()
-    assert client.get(f"/api/projects/{pid}").json()["separate_guitar"] is False
+    project = client.get(f"/api/projects/{pid}").json()
+    assert (project["separate_guitar"], project["source"]) == (False, "guitar")
     transcription = client.get(f"/api/projects/{pid}/transcription").json()
     assert (transcription["beats_per_measure"], transcription["key"]) == (4, None)
+    assert transcription["transpose"] == 0

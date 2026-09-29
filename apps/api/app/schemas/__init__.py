@@ -7,6 +7,7 @@ from app.schemas.project import (
     NoteSchema,
     NotesUpdate,
     ProjectOut,
+    RenderRequest,
     TranscriptionOut,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "NoteSchema",
     "NotesUpdate",
     "ProjectOut",
+    "RenderRequest",
     "TranscriptionOut",
 ]

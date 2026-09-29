@@ -2,6 +2,9 @@
 
 export type ProjectStatus = "pending" | "processing" | "completed" | "failed";
 
+/** What was recorded: a guitar, or a voice (sung, hummed or whistled melody) set for guitar. */
+export type Source = "guitar" | "voice";
+
 export interface Note {
   /** MIDI pitch (0-127). */
   pitch: number;
@@ -24,12 +27,20 @@ export interface Project {
   name: string;
   filename: string;
   status: ProjectStatus;
-  /** Song mode: the guitar is isolated from a band mix before transcription. */
+  source: Source;
+  /** Song mode: the guitar (voice: the vocals) is isolated from a band mix before transcription. */
   separate_guitar: boolean;
-  /** Models that transcribed it (compare with ModelInfo.version); null if unknown. */
+  /** The guitar's tuning (a key of TUNINGS in apps/web/lib/music.ts) and capo fret. */
+  tuning_name: string;
+  capo: number;
+  /** Models that transcribed it (compare with ModelInfo.version, or voice_version for
+   * voice projects); null if unknown. */
   model_version: string | null;
   /** The user saved edits since the transcription; re-transcribing discards them. */
   edited: boolean;
+  /** While transcribing: done fraction (0-1) and stage; null otherwise. */
+  progress: number | null;
+  stage: "loading" | "separating" | "transcribing" | "finishing" | null;
   error: string | null;
   duration: number | null;
   created_at: string;
@@ -39,6 +50,8 @@ export interface Project {
 /** The models new transcriptions use (GET /api/models). */
 export interface ModelInfo {
   version: string;
+  /** Version of the voice method (voice projects). */
+  voice_version: string;
   /** Checkpoint folders, e.g. "guitar_v8". */
   notes_model: string;
   tab_model: string | null;
@@ -47,8 +60,13 @@ export interface ModelInfo {
 export interface Transcription {
   project_id: string;
   tempo: number | null;
-  /** Open-string MIDI pitches, lowest string first. */
+  /** Open-string MIDI pitches the frets count from (capo included), lowest string first. */
   tuning: number[];
+  tuning_name: string;
+  capo: number;
+  /** Semitones the notes were moved from the recording (voice mode fits the melody
+   * into the guitar's range by octaves). */
+  transpose: number;
   /** Mean note confidence (there is no ground truth for user uploads). */
   mean_confidence: number | null;
   notes: Note[];
@@ -76,6 +94,14 @@ export interface AnalysisRequest {
   beats_per_measure: number;
   key: string | null;
   downbeat: number | null;
+}
+
+/** Notes and notation to engrave as MusicXML (POST /api/render/musicxml). */
+export interface RenderRequest extends AnalysisRequest {
+  /** Open strings the frets count from (capo included). */
+  tuning: number[];
+  capo: number;
+  title: string;
 }
 
 export interface MusicKey {

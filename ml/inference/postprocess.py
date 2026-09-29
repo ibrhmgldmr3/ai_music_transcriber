@@ -71,14 +71,22 @@ def tab_position_probs(
     frame_rate: float,
     tuning: Sequence[int],
     num_frets: int,
+    model_tuning: Sequence[int] | None = None,
 ) -> list[dict[tuple[int, int], float]]:
     """Per note: the tab head's belief in each (string, fret) that can play its pitch.
 
-    A candidate's score is the mean probability of its fret class on its string over the
-    note's duration; scores are normalized over the note's candidates.
+    A candidate's score is the mean probability over the note's duration, normalized over
+    the note's candidates. The head knows a string by the pitches it heard on it in its
+    own ``model_tuning`` (standard), so in another tuning or with a capo it is asked for
+    the class that plays this pitch in *its* tuning; where that doesn't exist (e.g. D2 on
+    the low string of Drop D) the string's activity stands in. Simulated by shifting the
+    GuitarSet test audio, this kept positions right for 93% of notes a whole step down
+    and 80% two whole steps down, where reading the head's classes as frets of the new
+    tuning got 65% and 35%.
     """
     tab_probs = np.asarray(tab_probs)  # (T, strings, classes)
     n_frames, _, n_classes = tab_probs.shape
+    model_tuning = list(model_tuning or tuning)
     result: list[dict[tuple[int, int], float]] = []
     for note in notes:
         if n_frames == 0:
@@ -87,13 +95,17 @@ def tab_position_probs(
         t0 = min(int(note.start * frame_rate), n_frames - 1)
         t1 = min(max(t0 + 1, int(round(note.end * frame_rate))), n_frames)
         segment = tab_probs[t0:t1]
-        scores = {
-            (string, note.pitch - open_pitch): float(
-                segment[:, string, note.pitch - open_pitch + 1].mean()
-            )
-            for string, open_pitch in enumerate(tuning)
-            if 0 <= note.pitch - open_pitch <= num_frets and note.pitch - open_pitch + 1 < n_classes
-        }
+        scores = {}
+        for string, open_pitch in enumerate(tuning):
+            fret = note.pitch - open_pitch
+            if not 0 <= fret <= num_frets:
+                continue
+            head_class = note.pitch - model_tuning[string] + 1
+            if 1 <= head_class < n_classes:
+                scores[(string, fret)] = float(segment[:, string, head_class].mean())
+            else:  # spread "the string sounds" over the classes like a fret probability
+                active = 1.0 - segment[:, string, 0].mean()
+                scores[(string, fret)] = float(active) / n_classes
         total = sum(scores.values())
         result.append({k: v / total for k, v in scores.items()} if total > 0 else {})
     return result
@@ -107,6 +119,7 @@ def assign_positions_from_tab(
     tuning: Sequence[int],
     num_frets: int,
     chord_tolerance: float = 0.05,
+    model_tuning: Sequence[int] | None = None,
 ) -> list[Note]:
     """Place notes with a tab head's evidence inside the fingering optimizer.
 
@@ -116,6 +129,11 @@ def assign_positions_from_tab(
     string/fret, versus 70% for the optimizer alone.
     """
     position_probs = tab_position_probs(
-        notes, tab_probs, frame_rate=frame_rate, tuning=tuning, num_frets=num_frets
+        notes,
+        tab_probs,
+        frame_rate=frame_rate,
+        tuning=tuning,
+        num_frets=num_frets,
+        model_tuning=model_tuning,
     )
     return assign_tab(notes, tuning, num_frets, chord_tolerance, position_probs=position_probs)

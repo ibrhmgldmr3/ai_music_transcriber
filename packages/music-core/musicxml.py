@@ -70,10 +70,13 @@ def notes_to_musicxml(
     beats_per_measure: int = 4,
     key: Key | None = None,
     downbeat: float | None = None,
+    capo: int = 0,
 ) -> bytes:
     """Build a MusicXML 4.0 document (UTF-8 bytes) from positioned notes.
 
     ``key`` and ``downbeat`` (the time of any bar line, seconds) override the estimates.
+    With a capo, ``tuning`` includes it, so the TAB staff's frets count from the capo
+    (the way it is played) in any program, and "Capo N" is written above the first bar.
     """
     if not (math.isfinite(tempo) and tempo > 0):
         tempo = 120.0
@@ -121,6 +124,8 @@ def notes_to_musicxml(
         if index == 0:
             _write_attributes(measure, tuning, analysis.key, beats_per_measure)
             _write_tempo(measure, tempo)
+            if capo:
+                _write_words(measure, f"Capo {capo}")
         for staff, voice in ((1, "1"), (2, "5")):
             if staff == 2:
                 ET.SubElement(ET.SubElement(measure, "backup"), "duration").text = str(
@@ -238,6 +243,12 @@ def _write_attributes(
         if alter:
             ET.SubElement(staff_tuning, "tuning-alter").text = str(alter)
         ET.SubElement(staff_tuning, "tuning-octave").text = str(octave)
+
+
+def _write_words(measure: ET.Element, text: str) -> None:
+    direction = ET.SubElement(measure, "direction", placement="above")
+    ET.SubElement(ET.SubElement(direction, "direction-type"), "words").text = text
+    ET.SubElement(direction, "staff").text = "1"
 
 
 def _write_tempo(measure: ET.Element, tempo: float) -> None:

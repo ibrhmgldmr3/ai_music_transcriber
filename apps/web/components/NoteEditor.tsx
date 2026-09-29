@@ -5,10 +5,14 @@ import { MAX_FRET, clamp, defaultPosition, midiToName, stringLabels } from "@/li
 
 interface NoteEditorProps {
   note: Note | null;
+  /** Open strings the frets count from (capo included). */
   tuning: number[];
+  capo?: number;
   maxFret?: number;
   /** Spells the note name (Bb rather than A# in F major). */
   musicKey?: MusicKey | null;
+  /** How many notes are selected; the fields edit the last one clicked. */
+  selectedCount?: number;
   onChange: (note: Note) => void;
   onDelete: () => void;
 }
@@ -23,8 +27,10 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
 export default function NoteEditor({
   note: selected,
   tuning,
+  capo = 0,
   maxFret = MAX_FRET,
   musicKey = null,
+  selectedCount = 1,
   onChange,
   onDelete,
 }: NoteEditorProps) {
@@ -38,7 +44,7 @@ export default function NoteEditor({
   }
 
   const note: Note = selected;
-  const labels = stringLabels(tuning);
+  const labels = stringLabels(tuning.map((pitch) => pitch - capo));
   const playableOn = (s: number) => {
     const fret = note.pitch - tuning[s];
     return fret >= 0 && fret <= maxFret;
@@ -87,9 +93,14 @@ export default function NoteEditor({
       <div className="row between">
         <h3>Nota: {midiToName(note.pitch, musicKey)}</h3>
         <button className="danger" onClick={onDelete}>
-          Sil
+          {selectedCount > 1 ? `${selectedCount} notayı sil` : "Sil"}
         </button>
       </div>
+      {selectedCount > 1 && (
+        <p className="muted small">
+          {selectedCount} nota seçili. Alanlar son tıklanan notayı düzenler; sürükleme ve ok tuşları hepsini taşır.
+        </p>
+      )}
 
       <div className="grid-2">
         <label className="field">

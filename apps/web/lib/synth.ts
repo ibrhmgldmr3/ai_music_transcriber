@@ -7,6 +7,9 @@ const TICK_MS = 25;
 const PLUCK_SECONDS = 2.5;
 const RELEASE = 0.04; // time constant of the fade after a note ends
 
+/** Playback gain of a note; the velocity shapes it only a little, like picking harder. */
+const noteLevel = (velocity: number) => 0.12 + 0.28 * (velocity / 127);
+
 /**
  * A plucked-string tone (Karplus-Strong): a noise burst circulating in a delay line
  * one period long, low-passed on every pass so the upper harmonics die out first like
@@ -139,7 +142,7 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks }: NotePlay
             voice(
               bufferFor(`n${note.pitch}`, () => pluck(ctx, note.pitch)),
               when,
-              0.12 + 0.28 * (note.velocity / 127),
+              noteLevel(note.velocity),
               when + Math.max(0.05, (note.end - note.start) / rate),
             ),
         });
@@ -222,4 +225,37 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks }: NotePlay
     },
     [],
   );
+}
+
+/**
+ * The notes played on the synthesized guitar, as audio (e.g. to download a sung melody
+ * as guitar). Same sound and levels as playback, peak-normalized.
+ */
+export async function renderNotes(notes: Note[], sampleRate = 44100): Promise<AudioBuffer> {
+  const tail = RELEASE * 8;
+  const end = notes.reduce((last, n) => Math.max(last, Math.min(n.start + PLUCK_SECONDS, n.end + tail)), 0);
+  const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil((end + 0.1) * sampleRate)), sampleRate);
+  const buffers = new Map<number, AudioBuffer>();
+  for (const note of notes) {
+    let buffer = buffers.get(note.pitch);
+    if (!buffer) {
+      buffer = pluck(ctx, note.pitch);
+      buffers.set(note.pitch, buffer);
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = noteLevel(note.velocity);
+    source.connect(gain).connect(ctx.destination);
+    const until = note.start + Math.max(0.05, note.end - note.start);
+    source.start(note.start);
+    gain.gain.setTargetAtTime(0, until, RELEASE);
+    source.stop(until + tail);
+  }
+  const rendered = await ctx.startRendering();
+  const samples = rendered.getChannelData(0);
+  let peak = 0;
+  for (const x of samples) peak = Math.max(peak, Math.abs(x));
+  if (peak > 0) for (let i = 0; i < samples.length; i++) samples[i] *= 0.9 / peak;
+  return rendered;
 }

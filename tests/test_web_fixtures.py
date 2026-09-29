@@ -12,6 +12,7 @@ from pathlib import Path
 from music_core.analysis import KEY_NAMES, Key
 from music_core.musicxml import DIVISIONS, _first_bar_line, _spell
 from music_core.notes import Note
+from music_core.tab import TUNINGS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "music_web.json"
 
@@ -57,6 +58,7 @@ def build() -> dict:
         )
     return {
         "key_names": list(KEY_NAMES),
+        "tunings": {name: list(strings) for name, strings in TUNINGS.items()},
         "midi_range": [36, 96],
         "spelling": spelling,
         "first_bars": first_bars,

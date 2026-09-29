@@ -1,10 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
-from app.schemas import AnalysisOut, AnalysisRequest, ChordOut, KeyOut
+from app.schemas import AnalysisOut, AnalysisRequest, ChordOut, KeyOut, RenderRequest
+from app.services.storage import clean_text
 from music_core.analysis import Analysis, Key, analyze
+from music_core.musicxml import notes_to_musicxml
 from music_core.notes import Note
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+render_router = APIRouter(prefix="/render", tags=["analysis"])
 
 
 def _key_out(key: Key | None) -> KeyOut | None:
@@ -43,3 +46,20 @@ def analyze_notes(payload: AnalysisRequest) -> AnalysisOut:
             downbeat=payload.downbeat,
         )
     )
+
+
+@render_router.post("/musicxml")
+def render_musicxml(payload: RenderRequest) -> Response:
+    """MusicXML of the given notes, like the project export but for unsaved edits."""
+    notes = [Note.from_dict(note.model_dump()) for note in payload.notes]
+    data = notes_to_musicxml(
+        notes,
+        tempo=payload.tempo or 120.0,
+        tuning=payload.tuning,
+        title=clean_text(payload.title) or "Transcription",
+        beats_per_measure=payload.beats_per_measure,
+        key=Key.parse(payload.key) if payload.key else None,
+        downbeat=payload.downbeat,
+        capo=payload.capo,
+    )
+    return Response(data, media_type="application/vnd.recordare.musicxml+xml")

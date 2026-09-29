@@ -1,8 +1,9 @@
 import hashlib
 import logging
 import threading
+import time
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models import Project, ProjectStatus, SessionLocal
+from music_core.tab import open_strings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,13 @@ def model_version() -> str:
     if settings.model_tab_checkpoint:
         paths.append(settings.model_tab_checkpoint)
     return "+".join(_fingerprint(path) for path in paths)
+
+
+def voice_version() -> str:
+    """The voice method's version (``ml.inference.voice``); it has no model file."""
+    from ml.inference.voice import VOICE_VERSION
+
+    return VOICE_VERSION
 
 
 def _fingerprint(path: Path) -> str:
@@ -124,7 +133,12 @@ def run_transcription(project_id: str) -> None:
         project = db.get(Project, project_id)
         audio_path = project.audio_path if project is not None else None
         separate = bool(project.separate_guitar) if project is not None else False
-    if audio_path is None or not _update(project_id, status=ProjectStatus.processing, error=None):
+        voice = project is not None and project.source == "voice"
+        tuning = open_strings(project.tuning_name, project.capo) if project is not None else None
+    started = _update(
+        project_id, status=ProjectStatus.processing, error=None, progress=0.0, stage="loading"
+    )
+    if audio_path is None or not started:
         logger.warning("Project %s disappeared before transcription", project_id)
         return
 
@@ -132,14 +146,33 @@ def run_transcription(project_id: str) -> None:
         _check_audio(audio_path)
         with _model_lock:
             separator = _load_separator() if separate else None
-            result = _load_predictor().transcribe(audio_path, separator=separator)
+            if voice:
+                from ml.inference.voice import transcribe_voice
+
+                result = transcribe_voice(
+                    audio_path,
+                    tuning=tuning,
+                    separator=partial(separator, stem="vocals") if separator else None,
+                    progress=_progress_reporter(project_id),
+                )
+                version = voice_version()
+            else:
+                result = _load_predictor().transcribe(
+                    audio_path,
+                    separator=separator,
+                    tuning=tuning,
+                    progress=_progress_reporter(project_id),
+                )
+                version = model_version()
     except TranscriptionError as exc:
         logger.warning("Transcription of %s rejected: %s", project_id, exc)
-        _update(project_id, status=ProjectStatus.failed, error=str(exc))
+        _update(project_id, status=ProjectStatus.failed, error=str(exc), progress=None, stage=None)
         return
     except Exception:  # report a generic failure; details stay in the logs
         logger.exception("Transcription failed for %s", project_id)
-        _update(project_id, status=ProjectStatus.failed, error=INTERNAL_ERROR)
+        _update(
+            project_id, status=ProjectStatus.failed, error=INTERNAL_ERROR, progress=None, stage=None
+        )
         return
 
     stored = _update(
@@ -148,14 +181,32 @@ def run_transcription(project_id: str) -> None:
         duration=result.duration,
         tempo=result.tempo,
         tuning=result.tuning,
-        model_version=model_version(),
+        transpose=result.transpose,
+        model_version=version,
         edited=False,
+        progress=None,
+        stage=None,
         status=ProjectStatus.completed,
     )
     if stored:
         logger.info("Transcribed %s: %d notes", project_id, len(result.notes))
     else:
         logger.info("Project %s was deleted during transcription", project_id)
+
+
+def _progress_reporter(project_id: str, interval: float = 0.5):
+    """Write progress to the project at most every ``interval`` seconds (and on every new
+    stage). Each write also refreshes ``updated_at``, so a long job never looks stale."""
+    last = {"time": 0.0, "stage": None}
+
+    def report(fraction: float, stage: str) -> None:
+        now = time.monotonic()
+        if stage == last["stage"] and now - last["time"] < interval:
+            return
+        last.update(time=now, stage=stage)
+        _update(project_id, progress=round(fraction, 3), stage=stage)
+
+    return report
 
 
 def job_is_stale(project: Project, now: datetime | None = None) -> bool:

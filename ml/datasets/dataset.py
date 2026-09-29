@@ -13,6 +13,42 @@ from torch.utils.data import Dataset
 from ml.preprocessing.augmentation import FeatureAugmenter
 
 TARGET_KEYS = ("onset", "frame", "offset", "tab")
+PITCH_KEYS = ("onset", "frame", "offset")
+
+
+def extend_pitch_range(
+    track: dict[str, np.ndarray], n_pitches: int, min_midi: int, sample_rate: int, hop_length: int
+) -> dict[str, np.ndarray]:
+    """Grow the piano-roll targets of ``track`` downwards to ``n_pitches`` rows.
+
+    Preprocessed files keep the range they were made with (E2-E6). A model with a lower
+    ``min_midi`` (for lowered tunings) gets the missing bottom rows rasterized from the
+    track's notes here, so the data needn't be preprocessed again.
+    """
+    stored = track["frame"].shape[1]
+    missing = n_pitches - stored
+    if missing <= 0:
+        if missing < 0:
+            raise ValueError(f"Targets have {stored} pitches, the model only {n_pitches}")
+        return track
+    from ml.preprocessing.annotations import array_to_notes, notes_to_targets
+
+    low = [n for n in array_to_notes(track["notes"]) if min_midi <= n.pitch < min_midi + missing]
+    extra = notes_to_targets(
+        low,
+        n_frames=track["frame"].shape[0],
+        sample_rate=sample_rate,
+        hop_length=hop_length,
+        min_midi=min_midi,
+        max_midi=min_midi + missing - 1,
+    )
+    extended = dict(track)
+    for key in PITCH_KEYS:
+        if key in track:
+            extended[key] = np.concatenate(
+                [extra[key].astype(track[key].dtype), track[key]], axis=1
+            )
+    return extended
 
 
 def split_into_parts(
@@ -63,13 +99,17 @@ class TranscriptionDataset(Dataset):
         augmenter: FeatureAugmenter | None = None,
         repeats: int = 1,
         preload: bool = True,
+        pitch_range: tuple[int, int, int, int] | None = None,
     ):
+        """``pitch_range`` = (n_pitches, min_midi, sample_rate, hop_length) of the model,
+        when it covers lower pitches than the files (see ``extend_pitch_range``)."""
         self.files = [Path(f) for f in files]
         if not self.files:
             raise ValueError("TranscriptionDataset needs at least one file")
         self.segment_frames = segment_frames
         self.augmenter = augmenter
         self.repeats = max(1, repeats)
+        self.pitch_range = pitch_range
         self._cache = [self._load(f) for f in self.files] if preload else None
 
     @classmethod
@@ -85,10 +125,12 @@ class TranscriptionDataset(Dataset):
             )
         return cls(files, **kwargs)
 
-    @staticmethod
-    def _load(path: Path) -> dict[str, np.ndarray]:
+    def _load(self, path: Path) -> dict[str, np.ndarray]:
         with np.load(path) as data:
-            return {key: data[key] for key in data.files}
+            track = {key: data[key] for key in data.files}
+        if self.pitch_range is not None:
+            track = extend_pitch_range(track, *self.pitch_range)
+        return track
 
     def __len__(self) -> int:
         return len(self.files) * self.repeats

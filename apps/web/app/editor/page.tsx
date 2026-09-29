@@ -2,14 +2,17 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import type { Analysis, ModelInfo, Note, Project, Transcription } from "@music-transcriber/shared-types";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Analysis, ModelInfo, Note, Project, Source, Transcription } from "@music-transcriber/shared-types";
 import GuitarTab from "@/components/GuitarTab";
+import NotationView from "@/components/NotationView";
 import NoteEditor from "@/components/NoteEditor";
 import PianoRoll from "@/components/PianoRoll";
 import PlaybackControls, { type ListenMode } from "@/components/PlaybackControls";
+import TuningPicker from "@/components/TuningPicker";
 import Waveform from "@/components/Waveform";
 import {
+  SOURCE_LABELS,
   STATUS_LABELS,
   analyzeNotes,
   audioUrl,
@@ -23,18 +26,24 @@ import {
   musicXmlUrl,
   retranscribe,
   saveNotes,
+  stageLabel,
   tabUrl,
 } from "@/lib/api";
+import { type Drag, applyDrag, copyNotes, deleteNotes, pasteNotes } from "@/lib/editing";
 import { KEY_NAMES, STANDARD_TUNING, beatGrid, defaultPosition, formatTime } from "@/lib/music";
 import { useSettings } from "@/lib/settings";
-import { useNotePlayer } from "@/lib/synth";
+import { useHistory } from "@/lib/useHistory";
+import { renderNotes, useNotePlayer } from "@/lib/synth";
 import { usePlayback } from "@/lib/usePlayback";
+import { encodeWav } from "@/lib/wav";
 
 // Same bounds as apps/api/app/schemas/project.py.
 const MIN_TEMPO = 20;
 const MAX_TEMPO = 400;
 const METERS = [2, 3, 4, 5, 6, 7];
 const ANALYSIS_DELAY_MS = 300;
+// One shared empty list, so "no notes yet" never looks like an unsaved edit.
+const NO_NOTES: Note[] = [];
 
 export default function EditorPage() {
   return (
@@ -51,7 +60,11 @@ function Editor() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [transcription, setTranscription] = useState<Transcription | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
+  // Notes with undo/redo; `savedNotes` is what the server has, so undoing back to it
+  // clears the unsaved state.
+  const history = useHistory<Note[]>(NO_NOTES);
+  const notes = history.value;
+  const [savedNotes, setSavedNotes] = useState<Note[]>(NO_NOTES);
   const [tempo, setTempo] = useState<number | null>(null);
   // Notation chosen by the user; null key / downbeat mean "estimate from the notes".
   const [beatsPerMeasure, setBeatsPerMeasure] = useState(4);
@@ -60,15 +73,23 @@ function Editor() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [analysisPending, setAnalysisPending] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // Selected note indices in click order; the last one is shown in the note editor.
+  const [selection, setSelection] = useState<number[]>([]);
+  const [notationDirty, setNotationDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [songMode, setSongMode] = useState(false);
+  // Guitar or voice recording, for the next transcription like the tuning below.
+  const [source, setSource] = useState<Source>("guitar");
+  const [rendering, setRendering] = useState(false);
+  // Tuning and capo for the next transcription; they take effect with "Yeniden çözümle".
+  const [tuningName, setTuningName] = useState("standard");
+  const [capo, setCapo] = useState(0);
   const [listen, setListen] = useState<ListenMode>("audio");
   const [metronome, setMetronome] = useState(false);
   const [models, setModels] = useState<ModelInfo | null>(null);
+  const [showScore, setShowScore] = useState(false);
 
   useEffect(() => {
     getModelInfo()
@@ -76,15 +97,28 @@ function Editor() {
       .catch(() => setModels(null));
   }, []);
 
-  const applyTranscription = useCallback((t: Transcription) => {
-    setTranscription(t);
-    setNotes(t.notes);
-    setTempo(t.tempo);
-    setBeatsPerMeasure(t.beats_per_measure);
-    setKeyChoice(t.key);
-    setDownbeatChoice(t.downbeat);
-    setDirty(false);
-  }, []);
+  const { reset: resetHistory } = history;
+  const applyTranscription = useCallback(
+    (t: Transcription) => {
+      setTranscription(t);
+      resetHistory(t.notes);
+      setSavedNotes(t.notes);
+      setTempo(t.tempo);
+      setBeatsPerMeasure(t.beats_per_measure);
+      setKeyChoice(t.key);
+      setDownbeatChoice(t.downbeat);
+      setNotationDirty(false);
+    },
+    [resetHistory],
+  );
+  const dirty = notes !== savedNotes || notationDirty;
+  const primary = selection.length ? selection[selection.length - 1] : null;
+  const selectionSet = useMemo(() => new Set(selection), [selection]);
+
+  // Undo/redo can remove notes that were selected.
+  useEffect(() => {
+    setSelection((current) => (current.every((i) => i < notes.length) ? current : current.filter((i) => i < notes.length)));
+  }, [notes.length]);
 
   // Load the project and poll until the transcription is finished.
   useEffect(() => {
@@ -97,13 +131,16 @@ function Editor() {
         if (cancelled) return;
         setProject(p);
         setSongMode(p.separate_guitar);
+        setSource(p.source);
+        setTuningName(p.tuning_name);
+        setCapo(p.capo);
         if (p.status === "completed") {
           const t = await getTranscription(id);
           if (cancelled) return;
           applyTranscription(t);
-          setSelected(null);
+          setSelection([]);
         } else if (p.status === "pending" || p.status === "processing") {
-          timer = setTimeout(load, 2000);
+          timer = setTimeout(load, 1000);
         }
       } catch (err) {
         if (!cancelled) setError(errorMessage(err));
@@ -176,29 +213,71 @@ function Editor() {
     [metronome, grid],
   );
   const musicKey = analysis?.key ?? null;
+  const scoreRequest = useMemo(
+    () =>
+      transcription
+        ? {
+            notes,
+            tempo,
+            beats_per_measure: beatsPerMeasure,
+            key: keyChoice,
+            downbeat: downbeatChoice,
+            tuning,
+            capo: transcription.capo,
+            title: project?.name ?? "Transcription",
+          }
+        : null,
+    [notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice, tuning, transcription, project?.name],
+  );
 
   const { setMuted } = playback;
   useEffect(() => setMuted(listen === "notes"), [listen, setMuted]);
   useNotePlayer({ audio: playback.audio, playing: playback.playing, notes, synth: listen !== "audio", clicks });
 
+  const { set: setNotes, undo, redo } = history;
   const updateNote = useCallback(
-    (note: Note) => {
-      setNotes((prev) => prev.map((n, i) => (i === selected ? note : n)));
-      setDirty(true);
-    },
-    [selected],
+    (note: Note) => setNotes(notes.map((n, i) => (i === primary ? note : n))),
+    [notes, primary, setNotes],
   );
 
   const deleteSelected = useCallback(() => {
-    if (selected === null) return;
-    setNotes((prev) => prev.filter((_, i) => i !== selected));
-    setSelected(null);
-    setDirty(true);
-  }, [selected]);
+    if (selection.length === 0) return;
+    setNotes(deleteNotes(notes, selection));
+    setSelection([]);
+  }, [notes, selection, setNotes]);
+
+  const select = useCallback((index: number | null, additive: boolean) => {
+    if (index === null) setSelection([]);
+    else if (additive)
+      setSelection((current) => (current.includes(index) ? current.filter((i) => i !== index) : [...current, index]));
+    else setSelection([index]);
+  }, []);
+
+  const selectMany = useCallback((indices: number[], additive: boolean) => {
+    setSelection((current) => (additive ? [...current, ...indices.filter((i) => !current.includes(i))] : indices));
+  }, []);
+
+  // A drag is applied to the notes as they were when it started, one undo step at the end.
+  // It reads the latest selection: pressing an unselected note selects it in the same
+  // gesture, after the component handling the pointer captured this callback.
+  const latest = useRef({ notes, selection, tuning });
+  latest.current = { notes, selection, tuning };
+  const dragBase = useRef<Note[] | null>(null);
+  const drag = useCallback(
+    (change: Drag, done: boolean) => {
+      const current = latest.current;
+      const base = dragBase.current ?? current.notes;
+      dragBase.current = done ? null : base;
+      setNotes(applyDrag(base, current.selection, change, current.tuning), !done);
+    },
+    [setNotes],
+  );
+
+  const clipboard = useRef<Note[]>([]);
 
   const addNote = () => {
     const start = playback.currentTime;
-    const pitch = selected !== null ? notes[selected]?.pitch ?? 64 : 64;
+    const pitch = primary !== null ? notes[primary]?.pitch ?? 64 : 64;
     const position = defaultPosition(pitch, tuning);
     const note: Note = {
       pitch,
@@ -209,19 +288,18 @@ function Editor() {
       fret: position?.fret ?? null,
       confidence: null,
     };
-    setNotes((prev) => [...prev, note]);
-    setSelected(notes.length);
-    setDirty(true);
+    setNotes([...notes, note]);
+    setSelection([notes.length]);
   };
 
   const editNotation = (change: () => void) => {
     change();
-    setDirty(true);
+    setNotationDirty(true);
   };
 
   /** The selected note's onset (else the playhead) becomes beat 1 of a bar. */
   const markDownbeat = () => {
-    const note = selected !== null ? notes[selected] : undefined;
+    const note = primary !== null ? notes[primary] : undefined;
     const time = note ? note.start : playback.currentTime;
     editNotation(() => setDownbeatChoice(Math.round(time * 1000) / 1000));
   };
@@ -251,15 +329,35 @@ function Editor() {
     const lost = dirty ? "Kaydedilmemiş değişiklikler" : project?.edited ? "Kaydettiğiniz düzenlemeler" : null;
     if (lost && !confirm(`${lost} kaybolacak. Devam edilsin mi?`)) return;
     try {
-      setProject(await retranscribe(id, songMode));
+      setProject(await retranscribe(id, { source, separateGuitar: songMode, tuning: tuningName, capo }));
       setTranscription(null);
       setAnalysis(null);
-      setNotes([]);
-      setSelected(null);
-      setDirty(false);
+      resetHistory(NO_NOTES);
+      setSavedNotes(NO_NOTES);
+      setNotationDirty(false);
+      setSelection([]);
       setReloadKey((k) => k + 1);
     } catch (err) {
       setError(errorMessage(err));
+    }
+  };
+
+  // The notes (saved or not) played on the synthesized guitar, as a WAV download.
+  const downloadGuitar = async () => {
+    setRendering(true);
+    setError(null);
+    try {
+      const rendered = await renderNotes(notes);
+      const url = URL.createObjectURL(encodeWav([rendered.getChannelData(0)], rendered.sampleRate));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${project?.name ?? "transcription"} (gitar).wav`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setRendering(false);
     }
   };
 
@@ -274,21 +372,50 @@ function Editor() {
     setLoop({ start: loop && loop.start < now ? loop.start : 0, end: now });
   }, [audio, loop, setLoop]);
 
-  // Space: play/pause · Delete/Backspace: remove note · Esc: deselect · A/B/L: loop · M: metronome.
+  // Space: play/pause · Delete: remove notes · Esc: deselect · A/B/L: loop · M: metronome ·
+  // arrows: nudge (Shift: more) · Ctrl+Z/Y: undo/redo · Ctrl+C/V: copy/paste at the playhead.
   useEffect(() => {
+    const nudge = (dt: number, steps: number) => {
+      if (selection.length) setNotes(applyDrag(notes, selection, { kind: "move", dt, steps }, tuning));
+    };
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const key = e.key.toLowerCase();
-      if (e.code === "Space") {
+      if (e.ctrlKey || e.metaKey) {
+        const handled = ["z", "y", "c", "v", "a"].includes(key);
+        if (key === "z" && e.shiftKey) redo();
+        else if (key === "z") undo();
+        else if (key === "y") redo();
+        else if (key === "c") clipboard.current = copyNotes(notes, selection);
+        else if (key === "v" && clipboard.current.length) {
+          const pasted = pasteNotes(notes, clipboard.current, audio?.currentTime ?? 0);
+          setNotes(pasted.notes);
+          setSelection(pasted.selection);
+        } else if (key === "a") setSelection(notes.map((_, i) => i));
+        if (handled) e.preventDefault();
+        return;
+      }
+      if (e.altKey) return;
+      const arrows: Record<string, [number, number]> = {
+        ArrowUp: [0, e.shiftKey ? 12 : 1],
+        ArrowDown: [0, e.shiftKey ? -12 : -1],
+        ArrowLeft: [e.shiftKey ? -0.1 : -0.01, 0],
+        ArrowRight: [e.shiftKey ? 0.1 : 0.01, 0],
+      };
+      if (e.key in arrows && selection.length) {
+        e.preventDefault();
+        nudge(...arrows[e.key]);
+      } else if (e.code === "Space") {
         e.preventDefault();
         toggle();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected !== null) {
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selection.length) {
         e.preventDefault();
         deleteSelected();
       } else if (e.key === "Escape") {
-        setSelected(null);
+        setSelection([]);
+      } else if (e.shiftKey) {
+        return;
       } else if (key === "a") {
         loopFromHere();
       } else if (key === "b") {
@@ -301,7 +428,7 @@ function Editor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggle, deleteSelected, selected, loopFromHere, loopUntilHere, setLoop]);
+  }, [toggle, deleteSelected, selection, notes, setNotes, undo, redo, audio, tuning, loopFromHere, loopUntilHere, setLoop]);
 
   if (!id) {
     return (
@@ -320,6 +447,7 @@ function Editor() {
         <div className="row">
           <h1>{project?.name ?? "Yükleniyor…"}</h1>
           {project && <span className={`badge ${project.status}`}>{STATUS_LABELS[project.status]}</span>}
+          {project?.source === "voice" && <span className="badge">Ses</span>}
           {project?.separate_guitar && <span className="badge">Şarkı modu</span>}
         </div>
         <div className="row">
@@ -328,6 +456,12 @@ function Editor() {
           </button>
           <button onClick={addNote} disabled={!transcription}>
             Nota ekle
+          </button>
+          <button onClick={undo} disabled={!history.canUndo} title="Geri al (Ctrl+Z)">
+            ↶ Geri al
+          </button>
+          <button onClick={redo} disabled={!history.canRedo} title="Yinele (Ctrl+Y)">
+            ↷ Yinele
           </button>
           <button onClick={() => void save()} disabled={!dirty || saving}>
             {saving ? "Kaydediliyor…" : "Kaydet"}
@@ -347,9 +481,35 @@ function Editor() {
               </button>
             ),
           )}
-          <label className="row compact small" title="Davul, bas veya vokal içeren kayıtlar için">
+          <button
+            onClick={() => void downloadGuitar()}
+            disabled={!notes.length || rendering}
+            title="Notaları sentezlenmiş gitar sesiyle çalıp WAV olarak indirir (kaydedilmemiş düzenlemeler dahil)"
+          >
+            {rendering ? "Hazırlanıyor…" : "Gitar sesi indir"}
+          </button>
+          <label className="row compact small" title="Kayıtta ne var?">
+            Kaynak
+            <select value={source} onChange={(e) => setSource(e.target.value as Source)} disabled={busy}>
+              {(Object.keys(SOURCE_LABELS) as Source[]).map((key) => (
+                <option key={key} value={key}>
+                  {SOURCE_LABELS[key]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <TuningPicker
+            tuning={tuningName}
+            capo={capo}
+            disabled={busy}
+            onChange={(nextTuning, nextCapo) => {
+              setTuningName(nextTuning);
+              setCapo(nextCapo);
+            }}
+          />
+          <label className="row compact small" title="Başka enstrümanlar da çalan kayıtlar için">
             <input type="checkbox" checked={songMode} onChange={(e) => setSongMode(e.target.checked)} />
-            Gitarı ayır
+            {source === "voice" ? "Vokali ayır" : "Gitarı ayır"}
           </label>
           <button onClick={() => void rerun()} disabled={busy || !project}>
             Yeniden çözümle
@@ -358,9 +518,33 @@ function Editor() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {busy && <div className="card muted">Model kaydı çözümlüyor… Sayfa otomatik olarak güncellenecek.</div>}
+      {busy && (
+        <div className="card stack tight">
+          <div className="row between">
+            <span>{project ? stageLabel(project) : "Sırada bekliyor"}…</span>
+            <span className="muted">{project?.progress != null ? `%${Math.round(project.progress * 100)}` : ""}</span>
+          </div>
+          <div className="progress" aria-label="Çözümleme ilerlemesi">
+            <div style={{ width: `${Math.round((project?.progress ?? 0) * 100)}%` }} />
+          </div>
+          <p className="muted small">Sayfa otomatik olarak güncellenecek.</p>
+        </div>
+      )}
       {project?.status === "failed" && <div className="card error">Çözümleme başarısız: {project.error}</div>}
       {dirty && <p className="muted small">Kaydedilmemiş değişiklikler var. Dışa aktarmadan önce kaydedin.</p>}
+      {project && (project.tuning_name !== tuningName || project.capo !== capo) && (
+        <p className="muted small">Akort veya capo değişti; tel ve perdeler &quot;Yeniden çözümle&quot; ile güncellenir.</p>
+      )}
+      {project && project.source !== source && (
+        <p className="muted small">Kaynak değişti; &quot;Yeniden çözümle&quot; ile uygulanır.</p>
+      )}
+      {transcription && transcription.transpose !== 0 && (
+        <p className="muted small">
+          Melodi gitarın aralığına sığsın diye {Math.abs(transcription.transpose / 12)} oktav{" "}
+          {transcription.transpose < 0 ? "aşağı" : "yukarı"} taşındı; kayıtla birlikte dinlerken notalar bu kadar farklı
+          duyulur.
+        </p>
+      )}
       {project && models && isOutdated(project, models) && (
         <div className="card notice row between">
           <span>
@@ -408,11 +592,14 @@ function Editor() {
                 <GuitarTab
                   notes={notes}
                   tuning={tuning}
+                  capo={transcription.capo}
                   duration={duration}
                   currentTime={playback.currentTime}
                   pixelsPerSecond={settings.pixelsPerSecond}
-                  selectedIndex={selected}
-                  onSelect={setSelected}
+                  selection={selectionSet}
+                  onSelect={select}
+                  onSelectMany={selectMany}
+                  onDrag={drag}
                   onSeek={playback.seek}
                   follow={settings.followPlayhead}
                   grid={grid}
@@ -427,8 +614,10 @@ function Editor() {
                   duration={duration}
                   currentTime={playback.currentTime}
                   pixelsPerSecond={settings.pixelsPerSecond}
-                  selectedIndex={selected}
-                  onSelect={setSelected}
+                  selection={selectionSet}
+                  onSelect={select}
+                  onSelectMany={selectMany}
+                  onDrag={drag}
                   onSeek={playback.seek}
                   follow={settings.followPlayhead}
                   grid={grid}
@@ -437,18 +626,30 @@ function Editor() {
                 />
               )}
               <p className="muted small">
-                Boşluk: oynat/duraklat · Delete: seçili notayı sil · Esc: seçimi kaldır · A / B: döngü başı / sonu ·
-                L: döngüyü kaldır · M: metronom
+                Tıkla: seç · Shift/Ctrl+tıkla: seçime ekle · Boş alanda sürükle: alan seç · Notayı sürükle: taşı
+                (TAB&apos;da yukarı/aşağı: başka tel) · Nota ucunu sürükle: uzat/kısalt · Oklar: perde / zaman
+                (Shift: oktav / 0.1 sn) · Ctrl+Z / Ctrl+Y: geri al / yinele · Ctrl+C / Ctrl+V: kopyala / oynatma
+                konumuna yapıştır · Ctrl+A: tümünü seç · Delete: sil · Boşluk: oynat · A / B / L: döngü · M: metronom
               </p>
             </div>
             <NoteEditor
-              note={selected !== null ? notes[selected] ?? null : null}
+              note={primary !== null ? notes[primary] ?? null : null}
+              selectedCount={selection.length}
               tuning={tuning}
+              capo={transcription.capo}
               musicKey={musicKey}
               onChange={updateNote}
               onDelete={deleteSelected}
             />
           </div>
+
+          <section className="stack tight">
+            <div className="row between">
+              <h3 className="section-title">Nota ve TAB (MusicXML önizlemesi)</h3>
+              <button onClick={() => setShowScore((on) => !on)}>{showScore ? "Gizle" : "Notayı göster"}</button>
+            </div>
+            {showScore && scoreRequest && <NotationView request={scoreRequest} />}
+          </section>
 
           <div className="card stats-bar">
             <span>
@@ -511,7 +712,7 @@ function Editor() {
                 onClick={markDownbeat}
                 title="Seçili notanın başlangıcını (seçim yoksa oynatma konumunu) ölçünün 1. vuruşu yapar"
               >
-                {selected !== null ? "Seçili nota 1. vuruş" : "Buradan başlat"}
+                {primary !== null ? "Seçili nota 1. vuruş" : "Buradan başlat"}
               </button>
               {downbeatChoice !== null && (
                 <button onClick={() => editNotation(() => setDownbeatChoice(null))}>Otomatik</button>

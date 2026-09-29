@@ -20,7 +20,7 @@ import numpy as np
 from tqdm import tqdm
 
 from ml.config import apply_overrides, load_config, num_pitches, parse_overrides
-from ml.datasets.dataset import read_split
+from ml.datasets.dataset import extend_pitch_range, read_split
 from ml.evaluation.metrics import (
     frame_metrics,
     mean_confidence,
@@ -46,6 +46,14 @@ def evaluate_files(
     for path in tqdm(files, desc="evaluating"):
         with np.load(path) as data:
             track = {key: data[key] for key in data.files}
+        audio = cfg["audio"]
+        track = extend_pitch_range(
+            track,
+            num_pitches(cfg),
+            cfg["labels"]["min_midi"],
+            audio["sample_rate"],
+            audio["hop_length"],
+        )
         probs = predictor.predict_features(track["features"].astype(np.float32))
         estimated = predictor.decode(probs)
         reference = array_to_notes(track["notes"])

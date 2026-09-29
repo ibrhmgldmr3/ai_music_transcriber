@@ -56,16 +56,30 @@ class Project(Base):
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus), default=ProjectStatus.pending
     )
-    # Song mode: isolate the guitar from a band mix before transcribing.
+    # What was recorded: "guitar" (the transcription model) or "voice" (a sung, hummed or
+    # whistled melody, ml.inference.voice), which is then set for guitar.
+    source: Mapped[str] = mapped_column(String(16), default="guitar", server_default="guitar")
+    # Song mode: isolate the guitar (voice: the vocals) from a band mix before transcribing.
     separate_guitar: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # The guitar's tuning (music_core.tab.TUNINGS) and capo; `tuning` below holds the
+    # resulting open strings, capo included, which the frets count from.
+    tuning_name: Mapped[str] = mapped_column(
+        String(32), default="standard", server_default="standard"
+    )
+    capo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Models that produced the transcription (services.transcription.model_version) and
     # whether the user has saved edits since, which a new transcription would discard.
     model_version: Mapped[str | None] = mapped_column(String(96), nullable=True)
     edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # While a transcription runs: the done fraction and its stage (Predictor.transcribe).
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     tempo: Mapped[float | None] = mapped_column(Float, nullable=True)
     tuning: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Semitones the notes were moved from the recording (voice: octaves, to fit the guitar).
+    transpose: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     notes: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Notation, set by the user; None means estimated from the notes (music_core.analysis).
     beats_per_measure: Mapped[int] = mapped_column(Integer, default=4, server_default="4")

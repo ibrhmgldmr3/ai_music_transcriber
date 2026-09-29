@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MusicKey } from "@music-transcriber/shared-types";
-import { KEY_NAMES, beatGrid, midiToName, playablePositions, STANDARD_TUNING } from "./music";
+import { KEY_NAMES, TUNINGS, beatGrid, midiToName, playablePositions, STANDARD_TUNING } from "./music";
 
 // Written by the Python implementation: python tests/test_web_fixtures.py
 interface Fixture {
   key_names: string[];
+  tunings: Record<string, number[]>;
   midi_range: [number, number];
   spelling: Record<string, { tonic: number | null; mode: "major" | "minor" | null; fifths: number; names: string[] }>;
   first_bars: { tempo: number; beats_per_measure: number; downbeat: number; first_note: number; bar1_time: number }[];
@@ -18,6 +19,10 @@ const fixture: Fixture = JSON.parse(
 describe("mirrors music_core", () => {
   it("lists the same keys", () => {
     expect(KEY_NAMES).toEqual(fixture.key_names);
+  });
+
+  it("offers the same tunings", () => {
+    expect(Object.fromEntries(Object.entries(TUNINGS).map(([name, t]) => [name, t.strings]))).toEqual(fixture.tunings);
   });
 
   it("spells every pitch in every key like the MusicXML export", () => {

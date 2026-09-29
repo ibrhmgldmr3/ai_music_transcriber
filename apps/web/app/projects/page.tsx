@@ -44,7 +44,7 @@ export default function ProjectsPage() {
   const busy = projects.some((p) => p.status === "pending" || p.status === "processing");
   useEffect(() => {
     if (!busy) return;
-    const timer = setInterval(() => void load(), 3000);
+    const timer = setInterval(() => void load(), 1500);
     return () => clearInterval(timer);
   }, [busy, load]);
 
@@ -132,6 +132,7 @@ export default function ProjectsPage() {
                     <div className="row compact">
                       <span className={`badge ${p.status}`} title={p.error ?? undefined}>
                         {STATUS_LABELS[p.status]}
+                        {p.status === "processing" && p.progress != null && ` %${Math.round(p.progress * 100)}`}
                       </span>
                       {isOutdated(p, models) && (
                         <span
@@ -143,6 +144,11 @@ export default function ProjectsPage() {
                           }
                         >
                           Eski model
+                        </span>
+                      )}
+                      {p.source === "voice" && (
+                        <span className="badge" title="Söylenen / mırıldanan melodiden">
+                          Ses
                         </span>
                       )}
                       {p.edited && <span className="badge">Düzenlendi</span>}

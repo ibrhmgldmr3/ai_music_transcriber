@@ -1,0 +1,15 @@
+# Note model for lowered tunings: the guitar_mixed.yaml recipe with the range extended
+# from E2 (MIDI 40) down to C2 (36), which covers Drop D, D standard, Drop C and
+# C standard. The low notes come from GuitarSet rendered 2 and 4 semitones down (the
+# ps-2 / ps-4 variants in base.yaml); the stored E2-E6 targets are extended on the fly.
+#
+# guitar_v9 = guitar_v8 fine-tuned with the extra low pitches:
+#   python scripts/train.py --config ml/configs/guitar_mixed_low.yaml \
+#       --init ml/checkpoints/guitar_v8/best.pt --set training.lr=2e-4 training.epochs=20
+extends: guitar_mixed.yaml
+
+labels:
+  min_midi: 36               # C2
+
+paths:
+  checkpoint_dir: ml/checkpoints/guitar_mixed_low

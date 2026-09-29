@@ -14,7 +14,7 @@ x-api-env: &api-env
   REDIS_URL: redis://redis:6379/0
   USE_CELERY: "true"
   STORAGE_DIR: /data/storage
-  MODEL_CHECKPOINT: /repo/ml/checkpoints/${NOTES_MODEL:-guitar_v8}/best.pt
+  MODEL_CHECKPOINT: /repo/ml/checkpoints/${NOTES_MODEL:-guitar_v9}/best.pt
   # Tab-head model that places notes on strings/frets (ml/configs/guitar_tab_mixed.yaml):
   MODEL_TAB_CHECKPOINT: /repo/ml/checkpoints/${TAB_MODEL:-guitar_v7}/best.pt
   CORS_ORIGINS: http://localhost:3000

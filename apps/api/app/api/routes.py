@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Project, ProjectStatus, get_db
 from app.schemas import NotesUpdate, ProjectOut, TranscriptionOut
+from app.schemas.project import SourceName, TuningName
 from app.services.storage import (
     InvalidUpload,
     clean_text,
@@ -34,7 +35,14 @@ from music_core.analysis import Key, estimate_key
 from music_core.midi import notes_to_midi_bytes
 from music_core.musicxml import notes_to_musicxml
 from music_core.notes import Note
-from music_core.tab import DEFAULT_NUM_FRETS, STANDARD_TUNING, assign_tab, tab_to_ascii
+from music_core.tab import (
+    DEFAULT_NUM_FRETS,
+    MAX_CAPO,
+    STANDARD_TUNING,
+    assign_tab,
+    open_strings,
+    tab_to_ascii,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -76,7 +84,10 @@ def _transcription_out(project: Project) -> TranscriptionOut:
     return TranscriptionOut(
         project_id=project.id,
         tempo=project.tempo,
-        tuning=project.tuning or list(STANDARD_TUNING),
+        tuning=project.tuning or list(open_strings(project.tuning_name, project.capo)),
+        tuning_name=project.tuning_name,
+        capo=project.capo,
+        transpose=project.transpose or 0,
         mean_confidence=sum(confidences) / len(confidences) if confidences else None,
         notes=notes,
         beats_per_measure=project.beats_per_measure or 4,
@@ -94,12 +105,18 @@ def create_project(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     name: str | None = Form(None),
+    source: SourceName = Form("guitar"),
     separate_guitar: bool = Form(False),
+    tuning: TuningName = Form("standard"),
+    capo: int = Form(0, ge=0, le=MAX_CAPO),
     db: Session = Depends(get_db),
 ) -> Project:
     """Upload a recording and start transcribing it.
 
-    ``separate_guitar`` (song mode) isolates the guitar from a band mix first.
+    ``source`` is "guitar", or "voice" for a sung, hummed or whistled melody to set
+    for guitar. ``separate_guitar`` (song mode) isolates the guitar (voice: the vocals)
+    from a band mix first; ``tuning`` and ``capo`` say how the guitar is tuned, for
+    its strings and frets.
     """
     try:
         audio_path = save_upload(file)
@@ -111,7 +128,10 @@ def create_project(
         name=clean_text(name) or clean_text(PurePath(filename).stem) or "Untitled",
         filename=filename,
         audio_path=str(audio_path),
+        source=source,
         separate_guitar=separate_guitar,
+        tuning_name=tuning,
+        capo=capo,
     )
     try:
         db.add(project)
@@ -154,15 +174,24 @@ def delete_project(project_id: str, db: Session = Depends(get_db)) -> Response:
 def retranscribe(
     project_id: str,
     background_tasks: BackgroundTasks,
+    source: SourceName | None = Query(None, description="guitar or voice recording"),
     separate_guitar: bool | None = Query(None, description="switch song mode on/off"),
+    tuning: TuningName | None = Query(None, description="the guitar's tuning"),
+    capo: int | None = Query(None, ge=0, le=MAX_CAPO, description="capo fret, 0 for none"),
     db: Session = Depends(get_db),
 ) -> Project:
     project = _get_project(db, project_id)
     # A job that stopped reporting (crashed worker, lost queue) may be restarted.
     if project.status in ACTIVE_STATUSES and not job_is_stale(project):
         raise HTTPException(status.HTTP_409_CONFLICT, "Transcription already in progress")
+    if source is not None:
+        project.source = source
     if separate_guitar is not None:
         project.separate_guitar = separate_guitar
+    if tuning is not None:
+        project.tuning_name = tuning
+    if capo is not None:
+        project.capo = capo
     project.status = ProjectStatus.pending
     project.error = None
     db.commit()
@@ -245,6 +274,7 @@ def export_musicxml(project_id: str, db: Session = Depends(get_db)) -> Response:
         beats_per_measure=project.beats_per_measure or 4,
         key=_chosen_key(project),
         downbeat=project.downbeat,
+        capo=project.capo,
     )
     return Response(
         data,
@@ -257,5 +287,5 @@ def export_musicxml(project_id: str, db: Session = Depends(get_db)) -> Response:
 def export_tab(project_id: str, db: Session = Depends(get_db)) -> PlainTextResponse:
     project = _get_project(db, project_id)
     notes = _require_transcription(project)
-    text = tab_to_ascii(notes, project.tuning or STANDARD_TUNING)
+    text = tab_to_ascii(notes, project.tuning or STANDARD_TUNING, capo=project.capo)
     return PlainTextResponse(text, headers=_attachment(f"{project.name}.txt"))

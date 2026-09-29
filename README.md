@@ -1,6 +1,6 @@
 # Music Transcriber
 
-Gitar kayıtlarını nota olaylarına, MIDI'ye ve gitar tab'ına dönüştüren uçtan uca bir otomatik müzik transkripsiyonu (AMT) projesi.
+Gitar kayıtlarını nota olaylarına, MIDI'ye ve gitar tab'ına dönüştüren uçtan uca bir otomatik müzik transkripsiyonu (AMT) projesi. Gitar yoksa söylenen, mırıldanan ya da ıslıkla çalınan bir melodinin de TAB'ı çıkarılabilir (bkz. [Ses → gitar](#ses--gitar-söyle-tabını-al)).
 
 ```
 guitar.wav
@@ -22,8 +22,8 @@ Tab optimizasyonu (Viterbi, minimum maliyetli parmak yolu) ──► Gitar TAB
 Müzik analizi (ton, vuruş/ölçü ızgarası, akor sembolleri) ──► MusicXML armür, ölçü, akorlar
    │
    ▼
-Müzik editörü (dalga formu, TAB + akorlar, piyano rulosu, sentezle dinleme, döngü, metronom,
-               düzenleme, MIDI/MusicXML/TAB dışa aktarma)
+Müzik editörü (dalga formu, TAB + akorlar, piyano rulosu, nota görünümü, sentezle dinleme, döngü,
+               metronom, sürükle-bırak düzenleme, geri al, MIDI/MusicXML/TAB dışa aktarma)
 ```
 
 **Temel tasarım kararı:** Notaları ML modeli tespit ediyor. Hangi notanın hangi tel ve perdede çalınacağına ise algoritmik bir sistem (`packages/music-core/tab.py`) karar veriyor:
@@ -51,7 +51,7 @@ GuitarSet test sonuçları (oyuncu 05, eğitimde hiç görülmedi):
 
 \* Referans notalar içinde hem doğru tespit edilip hem de doğru tel/perdeye konanların oranı.
 
-Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulamanın varsayılanı artık elektro gitar verisiyle de eğitilmiş V8 + V7 çifti (bkz. [Ek veri setleri](#ek-veri-setleri-elektro-gitar-ve-oda-mikrofonları)).
+Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulamanın varsayılanı artık elektro gitar verisiyle de eğitilmiş ve C2'ye kadar inen V9 + V7 çifti (bkz. [Ek veri setleri](#ek-veri-setleri-elektro-gitar-ve-oda-mikrofonları) ve [Farklı akortlar ve capo](#farklı-akortlar-ve-capo)).
 
 ## Dizin yapısı
 
@@ -59,13 +59,13 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 |---|---|
 | `apps/web` | Next.js arayüzü: yükleme, proje listesi, editör, ayarlar |
 | `apps/api` | FastAPI + SQLAlchemy + Celery (transkripsiyon işleri) |
-| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle) |
+| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle), `guitar_mixed_low.yaml` (C2'ye inen nota aralığı) |
 | `ml/preprocessing` | ses yükleme, log-mel/CQT, JAMS ve tel başına MIDI anotasyonları, augmentation |
 | `ml/datasets` | GuitarSet, EGDB ve Guitar-TECHS keşfi ve split'leri, PyTorch dataset |
 | `ml/models` | `ConvStack`, `CNN`, `CRNN` (BiLSTM/GRU), çıkış kafaları |
 | `ml/training` | eğitim döngüsü, loss, callback'ler |
 | `ml/evaluation` | frame/nota/tab metrikleri, değerlendirme, görselleştirme |
-| `ml/inference` | nota çözümleme (Onsets & Frames tarzı) ve `Predictor` |
+| `ml/inference` | nota çözümleme (Onsets & Frames tarzı), `Predictor`, şarkı modu (Demucs) ve ses modu (`voice.py`) |
 | `packages/music-core` | `Note`, MIDI, MusicXML, zamanlama, tab optimizasyonu, ton/ölçü/akor analizi (`music_core` olarak import edilir) |
 | `packages/shared-types` | API şemalarının TypeScript karşılıkları |
 | `scripts` | veri indirme/hazırlama, eğitim, değerlendirme |
@@ -197,11 +197,11 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build  # NVI
 - Web: http://localhost:3000 (üretim derlemesi, `next start`)
 - API: http://localhost:8000/docs
 
-Modeller `ml/checkpoints` klasöründen salt-okunur bağlanır. Varsayılan çift `guitar_v8` (notalar) ve `guitar_v7` (tel/perde); başka klasörler `NOTES_MODEL` ve `TAB_MODEL` ortam değişkenleriyle (ör. proje kökündeki `.env`) seçilir. Checkpoint yoksa yüklenen kayıtlar açıklayıcı bir hata mesajıyla **Başarısız** durumuna düşer. CPU imajı yeterince hızlı: 22 saniyelik bir kaydı CPU'da 0.7 s'de çözüyor. GPU asıl şarkı modunda (Demucs) fark ediyor ve imajı birkaç GB büyütüyor. Demucs ağırlıkları ilk kullanımda indirilip `model-cache` volume'unda saklanır.
+Modeller `ml/checkpoints` klasöründen salt-okunur bağlanır. Varsayılan çift `guitar_v9` (notalar) ve `guitar_v7` (tel/perde); başka klasörler `NOTES_MODEL` ve `TAB_MODEL` ortam değişkenleriyle (ör. proje kökündeki `.env`) seçilir. Checkpoint yoksa yüklenen kayıtlar açıklayıcı bir hata mesajıyla **Başarısız** durumuna düşer. CPU imajı yeterince hızlı: 22 saniyelik bir kaydı CPU'da 0.7 s'de çözüyor. GPU asıl şarkı modunda (Demucs) fark ediyor ve imajı birkaç GB büyütüyor. Demucs ağırlıkları ilk kullanımda indirilip `model-cache` volume'unda saklanır.
 
 ### Lokal geliştirme
 
-API ayarları `apps/api/.env` dosyasından okunuyor. Örnek dosyayı kopyalayıp hangi modelin kullanılacağını (`MODEL_CHECKPOINT`, örneğin `ml/checkpoints/guitar_v8/best.pt`, tab modeli için `MODEL_TAB_CHECKPOINT`, örneğin `ml/checkpoints/guitar_v7/best.pt`) orada seç. Göreli yollar proje köküne göre çözülüyor; veritabanı ve yüklenen sesler varsayılan olarak `apps/api` altında tutuluyor.
+API ayarları `apps/api/.env` dosyasından okunuyor. Örnek dosyayı kopyalayıp hangi modelin kullanılacağını (`MODEL_CHECKPOINT`, örneğin `ml/checkpoints/guitar_v9/best.pt`, tab modeli için `MODEL_TAB_CHECKPOINT`, örneğin `ml/checkpoints/guitar_v7/best.pt`) orada seç. Göreli yollar proje köküne göre çözülüyor; veritabanı ve yüklenen sesler varsayılan olarak `apps/api` altında tutuluyor.
 
 ```bash
 cp apps/api/.env.example apps/api/.env
@@ -229,6 +229,64 @@ API ortam değişkenleri: `DATABASE_URL`, `REDIS_URL`, `USE_CELERY`, `STORAGE_DI
 - **Döngü:** Dalga formunda sürükleyerek ya da **A** / **B** tuşlarıyla (oynatma konumu) seçilir, **L** kaldırır. Hız ayarıyla birlikte zor bir pasajı yavaş ve tekrar tekrar çalışmak için.
 - **Metronom** (**M**): tahmini vuruş ızgarasında tıklar, ölçü başları vurgulu. Tempo ve ölçü başının doğru olup olmadığını duymanın en kolay yolu.
 - **Izgara ve akorlar:** TAB ve piyano rulosunda vuruş ve ölçü çizgileri, ölçü numaraları (MusicXML ölçüleriyle aynı) ve TAB'ın üstünde akor sembolleri görünür. Bir notayı düzenleyince ya da BPM, ölçü veya tonu değiştirince bunlar kaydetmeden güncellenir (`POST /api/analysis`).
+- **Gitar sesi indir:** Notalar (kaydedilmemiş düzenlemeler dahil) aynı sentezlenmiş gitar sesiyle tarayıcıda WAV'a çevrilip indirilir. Söylenen bir melodiyi gitar sesi olarak almanın yolu.
+- **Nota görünümü:** "Notayı göster" ile MusicXML çıktısının kendisi (standart nota + TAB, armür, ölçü, akorlar) tarayıcıda [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org/) ile çizilir. Kaydedilmemiş düzenlemeler de görünür (`POST /api/render/musicxml`); dışa aktarmadan önce MuseScore'da nasıl görüneceğini kontrol etmek için.
+
+## Düzenleme
+
+Notalar piyano rulosunda ve TAB'da doğrudan fareyle düzenlenir:
+
+| İşlem | Nasıl |
+|---|---|
+| Seçmek | Tıkla; **Shift/Ctrl** + tıkla ekler/çıkarır; boş alanda sürükleyerek dikdörtgenle seç; **Ctrl+A** hepsi |
+| Taşımak | Piyano rulosunda seçili notaları sürükle (yatay: zaman, dikey: perde); TAB'da yatay sürükleme zamanı değiştirir |
+| Başka tele almak | TAB'da perde rakamını yukarı/aşağı sürükle: nota aynı perdede kalır, başka telde çalınabiliyorsa oraya geçer |
+| Uzatmak/kısaltmak | Piyano rulosunda notanın sağ kenarını sürükle |
+| İnce ayar | **↑/↓** yarım ton (**Shift**: oktav), **←/→** 10 ms (**Shift**: 100 ms) |
+| Kopyala/yapıştır | **Ctrl+C** / **Ctrl+V**; yapıştırılan notalar oynatma konumundan başlar |
+| Silmek | **Delete** |
+| Geri al / yinele | **Ctrl+Z** / **Ctrl+Y** (ya da **Ctrl+Shift+Z**) ve araç çubuğundaki düğmeler; bir sürükleme tek adım sayılır |
+
+Kaydedilmiş hale geri alınınca "kaydedilmemiş değişiklik" uyarısı da kalkar. Boş alana tıklamak oynatma konumunu oraya taşır.
+
+## Yükleme, kayıt ve ilerleme
+
+- **Mikrofonla kayıt:** Yükleme sayfasında "Mikrofonla kaydet" tarayıcıda WAV kaydeder (en fazla 8 dakika, seviye göstergesiyle) ve dosya seçmişsin gibi yükler. Yankı giderme, gürültü bastırma ve otomatik kazanç kapalı: konuşma için yapılmış bu işlemler gitar notalarını bozuyor. Tarayıcılar mikrofona yalnızca `localhost` ya da HTTPS üzerinden izin verir.
+- **İlerleme:** Çözümleme sürerken proje listesi ve editör aşamayı (yükleniyor, gitar ayrılıyor, notalar çözülüyor, son işlemler) ve yüzdeyi gösterir. Model, uzun kayıtları parça parça işlerken ilerlemeyi bildirir; API bunu en fazla yarım saniyede bir veritabanına yazar (`progress`, `stage`).
+
+## Ses → gitar: söyle, TAB'ını al
+
+Yüklerken "Ne kaydettiniz?" sorusuna **Ses (şarkı, mırıldanma, ıslık)** cevabı verilirse gitar modeli çalışmaz; tek sesli bir melodi notalara çevrilip seçilen akortta gitara yerleştirilir (`ml/inference/voice.py`). Sonrası gitar projeleriyle aynı: editör, TAB, MIDI/MusicXML ve **Gitar sesi indir** ile melodinin gitarla çalınmış hali (WAV). Eğitilmiş bir model yok, dolayısıyla eğitim de gerekmiyor:
+
+1. **Perde takibi:** pYIN (librosa) sesin temel frekansını ve sesli olup olmadığını izler; YIN'in daha ince tahmini, ikisi uyuştuğunda onun yerine geçer.
+2. **Kişisel akort:** Çoğu kişi tam A = 440 Hz'e göre söylemez. Kaydın ortalama sapması ölçülür ve yarım tonlar ona göre sayılır. 40 cent tiz söyleyen biri, her notası yarım ton yukarı yazılmadan transkribe edilir.
+3. **Notalara bölme:** Kareleri tek tek en yakın yarım tona yuvarlamak vibratoyu ve uzun notalardaki kaymayı ayrı notalara böler. Bunun yerine, bir anın 200 ms öncesi ve sonrasının ortalama perdesi en az 0.7 yarım ton farklıysa oradan kesilir. Her nota, karelerinin medyan perdesini alır. Kısa parçalar (notalar arası kayış, notaya aşağıdan giriş) komşusuna katılır. Nota, perdesi yerine oturduğu yerde başlar. Aynı perdede tekrarlanan heceler ("da-da-da") ancak belirgin bir ünsüz izi varsa ayrılır: spektral değişim ile sesliliğin ve ses şiddetinin çukuru birlikte.
+4. **Gitara yerleştirme:** Melodi gitarın aralığına sığmıyorsa (ıslık genelde bir iki oktav yukarıda) tam oktavlarla kaydırılır, editör bunu belirtir (`transpose`). Tel/perdeyi tab optimizer'ı seçer, tempo nota başlarından bulunur.
+
+Arkada müzik varsa "Müzik eşliğinde söylenmiş" seçeneği önce Demucs ile vokali ayırır. Aynı seçenek gitar projelerinde gitarı ayırır.
+
+**Ölçüm.** [VocalSet](https://zenodo.org/records/1442513) (20 profesyonel şarkıcı; gamlar, arpejler, uzun notalar ve üç kısa şarkı) ve her notanın başlangıç, bitiş ve perdesini işaretleyen [Annotated-VocalSet](https://zenodo.org/records/7061507) ile yapıldı (ikisi de CC BY 4.0). Ayarlar 6 şarkıcıda seçildi, aşağıdaki sonuçlar hiç kullanılmayan diğer 14 şarkıcıdan:
+
+```bash
+python scripts/benchmark_voice.py --vocalset ml/data/raw/vocalset/VocalSet11.zip --annotations ml/data/raw/vocalset/annotated_vocalset.zip
+```
+
+| Kayıtlar (14 şarkıcı) | Kayıt | Nota F1 (başlangıç ±50 ms) | Nota F1 (±100 ms) | Yalnız başlangıç F1 |
+|---|---|---|---|---|
+| Gamlar | 645 | 0.26 | 0.64 | 0.33 |
+| Arpejler | 683 | 0.35 | 0.64 | 0.45 |
+| Uzun notalar | 202 | 0.39 | 0.52 | 0.52 |
+| Şarkılar | 77 | 0.38 | 0.61 | 0.46 |
+| **Hepsi** | 1607 | **0.32** | **0.62** | 0.41 |
+
+Etiketler notaların yazılı perdesini veriyor, ama kayıtların çoğu ondan yarım ton (bazen bir oktav) farklı söylenmiş. Bu yüzden nota F1 her kaydı kendi tonunda, ona en iyi uyan tam yarım ton kaydırmasıyla ölçüyor. ±50 ms ile ±100 ms arasındaki büyük fark çoğunlukla bir tanım farkından geliyor: etiketler legato bir notayı, kayış bittikten sonra perde oturduğunda başlatıyor. Bu yöntemin başlangıçları ise o kayışın içinde, ortalama 50 ms önce kalıyor.
+
+Sınırlar:
+
+- Net ve ayrık söylenmiş melodilerde iyi çalışıyor. Hızlı pasajlar ve legato gamlar zorluyor: kayışla notanın kendisi arasındaki sınır belirsiz.
+- Aynı perdede sözle tekrarlanan notalar, ünsüz belirgin değilse tek nota olarak çıkıyor.
+- Üst üste kaydedilmiş vokaller (armoni, dublaj) ve ağır efektli vokaller pYIN'e sesli görünmüyor. Bir MUSDB şarkısının vokal kanalında karelerin yalnızca %7'si sesli sayıldı.
+- Tek sesli çalışıyor; aynı anda birden fazla nota (akor) çıkarmıyor.
 
 ## Ton, ölçü ve akorlar
 
@@ -249,6 +307,31 @@ GuitarSet oyuncu 05'in model transkripsiyonları üzerinde (uygulamanın gördü
 | Akor kökü / majör-minör doğru (zaman oranı) | 0.64 / 0.59 | akor yazılmıyor |
 
 Ölçü başı sololarda neredeyse tahmin edilemiyor, bu yüzden editörde elle düzeltilebilir: bir notayı seçip **Seçili nota 1. vuruş**'a basmak, ölçü çizgilerini o notaya hizalar. **Ölçü** (2/4–7/4) ve **Ton** seçimleri de aynı şekilde kaydedilir; "Otomatik"e dönünce tahmin kullanılır.
+
+## Farklı akortlar ve capo
+
+Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.
+
+**Tab kafası başka akortta.** Tab modeli yalnızca standart akortla eğitildi: bir teli, o telde duyduğu perdelerden tanıyor. Bu yüzden onun sınıflarını doğrudan yeni akortun perdeleri gibi okumak, notaları yanlış tele koyuyor. Bunun yerine her aday pozisyon için tab kafasına, bu perdenin *standart akortta* o telde hangi sınıfa düştüğü soruluyor. Standart akortta o telde çalınamayan notalarda (Drop D'de kalın teldeki D2 gibi) telin etkinliği kullanılıyor. GuitarSet testi kaydırılarak ölçüldüğünde, kayıt başına ortalama tel/perde isabeti bir ton aşağıda %65'ten %93'e, iki ton aşağıda %35'ten %80'e çıktı.
+
+**C2'ye inen nota modeli (V9).** V8'in aralığı E2'de (MIDI 40) başlıyor. Bu yüzden C standart ve Drop C'nin en kalın notalarını hiç yazamıyor. V9, `guitar_mixed_low.yaml` ile V8'den 20 epoch ince ayarlandı ve aralığı C2'ye (36) iniyor. Alçak notalar, GuitarSet'in 2 ve 4 yarım ton aşağı kaydırılmış kopyalarından (`ps-2`, `ps-4`) geliyor. Kayıtlı E2–E6 hedefleri yeniden hazırlanmıyor, eksik alt satırlar eğitim sırasında notalardan üretiliyor. Checkpoint'e eklenen satırlar, V8'in en alçak satırının kopyasıyla başlıyor.
+
+```bash
+python scripts/train.py --config ml/configs/guitar_mixed_low.yaml --init ml/checkpoints/guitar_v8/best.pt --set training.lr=2e-4 training.epochs=20 paths.checkpoint_dir=ml/checkpoints/guitar_v9
+python scripts/benchmark_tunings.py --model v8=ml/checkpoints/guitar_v8/best.pt+ml/checkpoints/guitar_v7/best.pt --model v9=ml/checkpoints/guitar_v9/best.pt+ml/checkpoints/guitar_v7/best.pt
+```
+
+GuitarSet testi, her tel aynı miktarda kaydırılarak (tab modeli ikisinde de V7):
+
+| Akort | Nota F1: V8 → V9 | Tel/perde isabeti: V8 → V9 | Tam doğru nota: V8 → V9 |
+|---|---|---|---|
+| Standart | 0.896 → 0.895 | 0.939 → 0.940 | 0.794 → 0.795 |
+| Yarım ton aşağı | 0.881 → 0.881 | 0.946 → 0.944 | 0.784 → 0.786 |
+| Bir ton aşağı | 0.877 → 0.878 | 0.927 → 0.931 | 0.756 → 0.766 |
+| İki ton aşağı (C) | 0.858 → 0.856 | 0.785 → 0.790 | 0.610 → **0.631** |
+| Capo 2 | 0.874 → 0.875 | 0.831 → 0.828 | 0.678 → 0.680 |
+
+V9 standart akortta V8 ile aynı sonucu veriyor. Diğer test setlerinde de aynı; yalnızca Guitar-TECHS'te nota F1'i 0.01–0.02 daha iyi. E2'nin altındaki notalar ise hâlâ zayıf. İki ton aşağıda test notalarının %2.6'sı bu aralığa düşüyor: V8 bunların hiçbirini bulamıyor, V9 üçte birini buluyor (isabet 0.38). Doğrulama setinde bu satırlar için daha düşük bir onset eşiği de denendi, ama bulduğu her doğru nota kadar yanlış nota ekledi. Daha iyisi için gerçekten alçak akortla çalınmış kayıtlarla eğitim gerekiyor.
 
 ## Dışa aktarma
 
@@ -275,7 +358,7 @@ Tempo, modelin onset tahminlerinden bulunur (GuitarSet testinde yarım/iki katı
 
 - **Efektsiz (V2+V3):** pitch shift, tempo, gürültü, reverb, EQ ve gain varyantlarıyla eğitilmiş çift.
 - **Efektli (V4+V5):** bunlara ek olarak overdrive, distortion, echo, telefon, büyük oda ve düşük SNR gürültü varyantlarıyla eğitilmiş çift (`--augment`).
-- **+ ek veri (V8+V7):** uygulamanın varsayılanı; EGDB ve Guitar-TECHS'in gerçek elektro gitar ve mikrofon kayıtları eklenmiş hali. Efektli eğitimin temiz kayıtlarda kaybettirdiği puanın bir kısmını geri alıyor ve her koşulda V4+V5'ten iyi.
+- **+ ek veri (V8+V7):** EGDB ve Guitar-TECHS'in gerçek elektro gitar ve mikrofon kayıtları eklenmiş hali. Efektli eğitimin temiz kayıtlarda kaybettirdiği puanın bir kısmını geri alıyor ve her koşulda V4+V5'ten iyi. Uygulamanın varsayılan nota modeli V9, V8'in aralığı C2'ye genişletilmiş hali.
 
 Echo'da F1 düşük, çünkü yankılar da nota olarak yazılıyor. Test efektleri eğitimdeki GuitarSet efekt türleriyle aynı; yalnızca kayıtların kendisi görülmemiş.
 
@@ -302,7 +385,7 @@ Mevcut korumalar:
 - **Yükleme doğrulaması:** Yalnızca izin verilen uzantılar kabul ediliyor ve dosyanın içeriği magic bytes ile kontrol ediliyor. `.wav` uzantılı bir HTML dosyası reddediliyor. Dosyalar rastgele adlarla ve gerçek formatlarına uygun uzantıyla kaydediliyor.
 - **Boyut sınırları:** İstek gövdesi akış sırasında ölçülüyor, sınırı aşan yükleme diske tamamen yazılmadan kesiliyor ve 413 dönüyor. Ses süresi `MAX_AUDIO_MINUTES` ile, editörden kaydedilen nota sayısı `MAX_NOTES` ile sınırlı. Nota değerlerinin de üst sınırları var: NaN ve sonsuz değer yok, zaman en fazla 6 saat.
 - **CSRF:** İzin verilen origin'lerin (`CORS_ORIGINS`) dışından gelen POST, PUT ve DELETE istekleri 403 ile reddediliyor. Origin başlığı göndermeyen istemciler (curl, betikler) bu kontrolden etkilenmiyor.
-- **Başlıklar:** `nosniff`, `X-Frame-Options: DENY` ve API yanıtlarında `Content-Security-Policy: default-src 'none'` gönderiliyor.
+- **Başlıklar:** `nosniff`, `X-Frame-Options: DENY` ve API yanıtlarında `Content-Security-Policy: default-src 'none'` gönderiliyor. Web uygulamasının `Permissions-Policy` başlığı mikrofonu yalnızca uygulamanın kendi sayfalarına açıyor, kamera ve konumu kapatıyor.
 - **Hata mesajları:** İç hata ayrıntıları yalnızca sunucu log'una yazılıyor, kullanıcıya genel bir mesaj gösteriliyor. Doğrulama hataları gönderilen değeri geri yansıtmıyor.
 - **Dosya yolları:** Dosya adları temizleniyor. Silme ve sunma işlemleri yalnızca depolama klasörünün içindeki dosyalarla sınırlı.
 - **İş kurtarma:** `JOB_TIMEOUT_MINUTES` süresinden uzun takılı kalan işler yeniden başlatılabiliyor. Süreç içi modda sunucu yeniden başlarken yarım kalan işler "başarısız" olarak işaretleniyor.
@@ -312,19 +395,20 @@ Mevcut korumalar:
 
 | Metot | Yol | Açıklama |
 |---|---|---|
-| `POST` | `/api/projects` | Ses yükle (`file`, isteğe bağlı `name`), transkripsiyonu başlat |
+| `POST` | `/api/projects` | Ses yükle (`file`; isteğe bağlı `name`, `source` (`guitar` / `voice`), `separate_guitar`, `tuning`, `capo`), transkripsiyonu başlat |
 | `GET` | `/api/projects` | Projeleri listele |
-| `GET` | `/api/projects/{id}` | Proje durumu |
+| `GET` | `/api/projects/{id}` | Proje durumu; çözümleme sürerken `progress` (0–1) ve `stage` |
 | `DELETE` | `/api/projects/{id}` | Projeyi ve ses dosyasını sil |
-| `POST` | `/api/projects/{id}/retranscribe` | Yeniden çözümle |
+| `POST` | `/api/projects/{id}/retranscribe` | Yeniden çözümle; `?source=`, `?separate_guitar=`, `?tuning=`, `?capo=` ile ayarlar değiştirilebilir |
 | `GET` | `/api/projects/{id}/audio` | Orijinal ses |
-| `GET` | `/api/projects/{id}/transcription` | Notalar, tempo, akort, ortalama güven |
+| `GET` | `/api/projects/{id}/transcription` | Notalar, tempo, akort, ortalama güven, ses modunda oktav kaydırması (`transpose`) |
 | `PUT` | `/api/projects/{id}/notes` | Editörde düzenlenen notaları ve isteğe bağlı tempo, ölçü (`beats_per_measure`), ton (`key`) ve ölçü başı (`downbeat`) düzeltmelerini kaydet; tel/perdesi olmayan notalara optimizer pozisyon atar |
 | `GET` | `/api/projects/{id}/midi` | MIDI dışa aktar |
 | `GET` | `/api/projects/{id}/musicxml` | Nota + TAB içeren MusicXML (MuseScore, Guitar Pro) |
 | `GET` | `/api/projects/{id}/tab` | ASCII TAB dışa aktar |
 | `POST` | `/api/analysis` | Verilen notaların tonu, ölçü ızgarası ve akorları (kaydedilmemiş düzenlemeler için) |
-| `GET` | `/api/models` | Yeni transkripsiyonların kullandığı modeller (`version`) |
+| `POST` | `/api/render/musicxml` | Verilen notaların MusicXML'i (editördeki nota görünümü için; `tuning`, `capo`, `title` ve analiz alanları) |
+| `GET` | `/api/models` | Yeni transkripsiyonların kullandığı modeller (`version`) ve ses modu yöntemi (`voice_version`) |
 
 Her proje, onu çözen modelin sürümünü (`model_version`: checkpoint klasörü ve dosya parmak izi) ve kullanıcının düzenleme kaydedip kaydetmediğini (`edited`) taşır. Model değişince proje listesi eski modelle çözülenleri işaretler; düzenlenmemiş olanlar tek tuşla güncel modelle yeniden çözümlenebilir. Düzenlenmiş projeler, düzenlemeler kaybolacağı için yalnızca editörden tek tek yenilenir.
 

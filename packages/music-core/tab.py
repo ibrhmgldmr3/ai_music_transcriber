@@ -20,6 +20,31 @@ from music_core.notes import NOTE_NAMES, Note, sort_notes
 STANDARD_TUNING: tuple[int, ...] = (40, 45, 50, 55, 59, 64)  # E2 A2 D3 G3 B3 E4
 DROP_D_TUNING: tuple[int, ...] = (38, 45, 50, 55, 59, 64)
 DEFAULT_NUM_FRETS = 20
+MAX_CAPO = 12
+
+# Six-string tunings the app offers. Keep in sync with TUNINGS in apps/web/lib/music.ts
+# (checked by tests/test_web_fixtures.py). The lowest note, C2, is the note model's.
+TUNINGS: dict[str, tuple[int, ...]] = {
+    "standard": STANDARD_TUNING,
+    "half_step_down": (39, 44, 49, 54, 58, 63),  # Eb Ab Db Gb Bb eb
+    "full_step_down": (38, 43, 48, 53, 57, 62),  # D G C F A d
+    "drop_d": DROP_D_TUNING,
+    "drop_c": (36, 43, 48, 53, 57, 62),  # C G C F A d
+    "c_standard": (36, 41, 46, 51, 55, 60),  # C F Bb Eb G c
+    "dadgad": (38, 45, 50, 55, 57, 62),
+    "open_g": (38, 43, 50, 55, 59, 62),  # D G D G B d
+    "open_d": (38, 45, 50, 54, 57, 62),  # D A D F# A d
+}
+
+
+def open_strings(name: str = "standard", capo: int = 0) -> tuple[int, ...]:
+    """Open-string pitches for a named tuning with a capo; frets then count from the capo."""
+    if name not in TUNINGS:
+        raise ValueError(f"Unknown tuning {name!r}; expected one of {sorted(TUNINGS)}")
+    if not 0 <= capo <= MAX_CAPO:
+        raise ValueError(f"Capo must be between 0 and {MAX_CAPO}, got {capo}")
+    return tuple(pitch + capo for pitch in TUNINGS[name])
+
 
 Position = tuple[int, int]  # (string, fret)
 State = tuple[Position | None, ...]  # one position per playable note of an event
@@ -279,12 +304,15 @@ def tab_to_ascii(
     columns_per_second: float = 8.0,
     line_width: int = 80,
     chord_tolerance: float = 0.05,
+    capo: int = 0,
 ) -> str:
     """Render positioned notes as plain-text tablature (highest string on top).
 
     Columns follow the timing, but each event (a note or a chord) starts at least one
     dash after the previous one, so close notes never merge (5 then 6 must not read as
     fret 56). Chords stay vertically aligned and lines never break inside a number.
+    With a capo, ``tuning`` includes it (frets count from the capo), the strings keep
+    their own names and a "Capo N" line comes first.
     """
     placed = sort_notes(
         n
@@ -312,7 +340,7 @@ def tab_to_ascii(
     def inside_number(col: int) -> bool:  # a fret number continues from col - 1 into col
         return any(row[col - 1].isdigit() and row[col].isdigit() for row in rows)
 
-    labels = string_labels(tuning)
+    labels = string_labels([pitch - capo for pitch in tuning])
     label_width = max(len(label) for label in labels)
     blocks = []
     start = 0
@@ -326,4 +354,5 @@ def tab_to_ascii(
         ]
         blocks.append("\n".join(lines))
         start = end
-    return "\n\n".join(blocks) + "\n"
+    header = f"Capo {capo}\n\n" if capo else ""
+    return header + "\n\n".join(blocks) + "\n"

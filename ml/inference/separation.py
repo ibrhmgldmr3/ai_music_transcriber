@@ -1,4 +1,4 @@
-"""Song mode: isolate the guitar from a full mix before transcription.
+"""Song mode: isolate the guitar (or, in voice mode, the vocals) from a full mix.
 
 Uses Demucs ``htdemucs_6s`` (Rouard et al., 2023), which separates drums, bass, vocals,
 piano, guitar and "other". Its weights are downloaded on first use into the torch hub
@@ -25,15 +25,15 @@ class GuitarSeparator:
         self.model = get_model(model_name).to(self.device).eval()
         if "guitar" not in self.model.sources:
             raise ValueError(f"Demucs model {model_name} has no guitar stem")
-        self.guitar = self.model.sources.index("guitar")
         self.sample_rate = int(self.model.samplerate)
 
     @torch.no_grad()
-    def __call__(self, y: np.ndarray, sample_rate: int) -> np.ndarray:
-        """Mono mix -> peak-normalized mono guitar stem at the same sample rate."""
+    def __call__(self, y: np.ndarray, sample_rate: int, stem: str = "guitar") -> np.ndarray:
+        """Mono mix -> peak-normalized mono ``stem`` (e.g. "vocals") at the same rate."""
         import librosa
         from demucs.apply import apply_model
 
+        index = self.model.sources.index(stem)
         x = y
         if sample_rate != self.sample_rate:
             x = librosa.resample(y, orig_sr=sample_rate, target_sr=self.sample_rate)
@@ -46,8 +46,8 @@ class GuitarSeparator:
             overlap=0.25,
             progress=False,
         )[0]
-        guitar = (sources[self.guitar] * scale + center).mean(0).cpu().numpy()
+        out = (sources[index] * scale + center).mean(0).cpu().numpy()
         if sample_rate != self.sample_rate:
-            guitar = librosa.resample(guitar, orig_sr=self.sample_rate, target_sr=sample_rate)
-        guitar = np.pad(guitar, (0, max(0, len(y) - len(guitar))))[: len(y)]
-        return normalize_peak(guitar).astype(np.float32)
+            out = librosa.resample(out, orig_sr=self.sample_rate, target_sr=sample_rate)
+        out = np.pad(out, (0, max(0, len(y) - len(out))))[: len(y)]
+        return normalize_peak(out).astype(np.float32)

@@ -1,12 +1,13 @@
 # Keep in sync with packages/shared-types/index.ts.
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
 from app.models.project import ProjectStatus
 from music_core.analysis import KEY_NAMES
+from music_core.tab import TUNINGS
 
 MAX_NOTE_SECONDS = 6 * 3600.0  # far beyond max_audio_minutes; bounds MIDI/tab export sizes
 MAX_STRINGS = 12
@@ -22,6 +23,9 @@ def _known_key(value: str | None) -> str | None:
 
 
 KeyName = Annotated[str | None, AfterValidator(_known_key)]
+TuningName = Literal[tuple(TUNINGS)]  # type: ignore[valid-type]
+# What was recorded: a guitar, or a voice (sung, hummed or whistled melody).
+SourceName = Literal["guitar", "voice"]
 Tempo = Annotated[float | None, Field(ge=MIN_TEMPO, le=MAX_TEMPO)]
 BeatsPerMeasure = Annotated[int, Field(ge=MIN_BEATS, le=MAX_BEATS)]
 Downbeat = Annotated[float | None, Field(ge=0, le=MAX_NOTE_SECONDS)]
@@ -55,11 +59,18 @@ class ProjectOut(BaseModel):
     name: str
     filename: str
     status: ProjectStatus
+    source: SourceName
     separate_guitar: bool
+    tuning_name: str
+    capo: int
     # Models that transcribed it (null before this was recorded) and whether the user
     # saved edits since.
     model_version: str | None
     edited: bool
+    # While transcribing: done fraction (0-1) and stage (loading, separating,
+    # transcribing, finishing).
+    progress: float | None
+    stage: str | None
     error: str | None
     duration: float | None
     created_at: datetime
@@ -67,7 +78,8 @@ class ProjectOut(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    version: str  # compare with ProjectOut.model_version
+    version: str  # compare with ProjectOut.model_version of guitar projects
+    voice_version: str  # ... and of voice projects
     notes_model: str  # checkpoint folder, e.g. "guitar_v8"
     tab_model: str | None
 
@@ -75,7 +87,13 @@ class ModelInfo(BaseModel):
 class TranscriptionOut(BaseModel):
     project_id: str
     tempo: float | None
+    # Open-string pitches the frets count from (capo included), lowest string first.
     tuning: list[int]
+    tuning_name: str
+    capo: int
+    # Semitones the notes were moved from the recording (voice mode fits the melody
+    # into the guitar's range by octaves).
+    transpose: int
     mean_confidence: float | None
     notes: list[NoteSchema]
     # Notation chosen by the user; null key/downbeat mean "estimate from the notes".
@@ -109,6 +127,15 @@ class AnalysisRequest(BaseModel):
     beats_per_measure: BeatsPerMeasure = 4
     key: KeyName = None  # null: estimate
     downbeat: Downbeat = None  # null: estimate
+
+
+class RenderRequest(AnalysisRequest):
+    """Notes and notation to engrave, e.g. unsaved edits for the editor's score view."""
+
+    # Open strings the frets count from (capo included), lowest string first.
+    tuning: list[Annotated[int, Field(ge=0, le=127)]] = Field(min_length=4, max_length=MAX_STRINGS)
+    capo: int = Field(default=0, ge=0, le=12)
+    title: str = Field(default="Transcription", max_length=255)
 
 
 class KeyOut(BaseModel):

@@ -12,6 +12,7 @@
   "dependencies": {
     "@music-transcriber/shared-types": "file:../../packages/shared-types",
     "next": "^15.5.26",
+    "opensheetmusicdisplay": "^2.1.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

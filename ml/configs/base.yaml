@@ -55,6 +55,7 @@ offline_augmentation:
   variants:
     - {name: ps+1, pitch_shift: 1}
     - {name: ps-2, pitch_shift: -2}
+    - {name: ps-4, pitch_shift: -4}      # lowered tunings (down to C2) for min_midi 36 models
     - {name: tempo0.9, time_stretch: 0.9}
     - {name: tempo1.1, time_stretch: 1.1}
     - {name: noise, noise_snr_db: [20, 35]}

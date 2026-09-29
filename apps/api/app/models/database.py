@@ -31,6 +31,12 @@ _ADDED_COLUMNS = [
     ("projects", "downbeat", "FLOAT"),
     ("projects", "model_version", "VARCHAR(96)"),
     ("projects", "edited", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("projects", "tuning_name", "VARCHAR(32) NOT NULL DEFAULT 'standard'"),
+    ("projects", "capo", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "progress", "FLOAT"),
+    ("projects", "stage", "VARCHAR(32)"),
+    ("projects", "source", "VARCHAR(16) NOT NULL DEFAULT 'guitar'"),
+    ("projects", "transpose", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

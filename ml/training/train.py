@@ -186,10 +186,32 @@ class Trainer:
         logger.info("Resumed from %s (next epoch %d)", path, self.start_epoch)
 
     def load_weights(self, path: Path) -> None:
-        """Model weights only (fine-tuning); optimizer, schedule and epoch start fresh."""
+        """Model weights only (fine-tuning); optimizer, schedule and epoch start fresh.
+
+        When this model covers more low pitches than the checkpoint, the pitch heads'
+        rows are matched by pitch and the new bottom rows start as copies of the old
+        lowest one.
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
-        self.model.load_state_dict(ckpt["model"])
-        logger.info("Initialized weights from %s", path)
+        shift = ckpt["config"]["labels"]["min_midi"] - self.cfg["labels"]["min_midi"]
+        state = self.model.state_dict()
+        for name, value in ckpt["model"].items():
+            target = state[name]
+            if value.shape == target.shape:
+                state[name] = value
+            elif (
+                shift > 0
+                and value.shape[1:] == target.shape[1:]
+                and (target.shape[0] == value.shape[0] + shift)
+            ):
+                grown = torch.cat([value[:1].expand(shift, *value.shape[1:]), value])
+                state[name] = grown.clone()
+            else:
+                raise ValueError(
+                    f"{name}: checkpoint {tuple(value.shape)}, model {tuple(target.shape)}"
+                )
+        self.model.load_state_dict(state)
+        logger.info("Initialized weights from %s (%d new low pitches)", path, max(shift, 0))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -220,6 +242,12 @@ def main(argv: list[str] | None = None) -> None:
 
     paths, t = cfg["paths"], cfg["training"]
     processed_dir, splits_dir = Path(paths["processed_dir"]), Path(paths["splits_dir"])
+    pitch_range = (
+        num_pitches(cfg),
+        cfg["labels"]["min_midi"],
+        cfg["audio"]["sample_rate"],
+        cfg["audio"]["hop_length"],
+    )
     train_ds = TranscriptionDataset.from_split(
         processed_dir,
         splits_dir / "train.txt",
@@ -227,8 +255,11 @@ def main(argv: list[str] | None = None) -> None:
         augmenter=FeatureAugmenter.from_config(cfg.get("augmentation")),
         repeats=t.get("repeats", 1),
         preload=t.get("preload", True),
+        pitch_range=pitch_range,
     )
-    val_ds = TranscriptionDataset.from_split(processed_dir, splits_dir / "val.txt")
+    val_ds = TranscriptionDataset.from_split(
+        processed_dir, splits_dir / "val.txt", pitch_range=pitch_range
+    )
     logger.info("Train samples/epoch: %d, validation tracks: %d", len(train_ds), len(val_ds))
 
     num_workers = t.get("num_workers", 0)

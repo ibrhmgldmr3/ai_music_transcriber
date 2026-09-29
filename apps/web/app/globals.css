@@ -44,6 +44,8 @@ code { background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .row.compact { gap: 6px; }
+.source-picker { border: 0; padding: 0; margin: 0; gap: 16px; }
+.source-picker legend { padding: 0; margin-bottom: 6px; color: var(--muted); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .muted { color: var(--muted); }
@@ -150,3 +152,10 @@ th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
 .notation-select { max-width: 150px; }
 .badge.outdated { color: var(--accent-2); }
 .card.notice { border-color: var(--accent-2); }
+.level-meter { width: 160px; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.level-meter > div { height: 100%; background: var(--success); transition: width 0.1s; }
+.pr-note-handle { fill: transparent; cursor: ew-resize; }
+.pr-note, .tab-fret { cursor: grab; }
+.marquee { fill: rgba(110, 168, 254, 0.12); stroke: var(--accent); stroke-dasharray: 4 3; pointer-events: none; }
+/* Engraved score on paper: the notation library draws black on transparent. */
+.score { background: #fff; color: #000; border-radius: var(--radius); padding: 8px; overflow-x: auto; min-height: 40px; }

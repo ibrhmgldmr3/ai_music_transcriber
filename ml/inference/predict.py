@@ -6,7 +6,7 @@ python -m ml.inference.predict guitar.wav --midi out.mid --tab out.txt
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,10 @@ from music_core.tab import assign_tab
 
 DEFAULT_CHECKPOINT = Path("ml/checkpoints/guitar/best.pt")
 
+# progress(fraction, stage) with stage one of "loading", "separating", "transcribing",
+# "finishing"; fraction is the whole job's, in [0, 1].
+ProgressCallback = Callable[[float, str], None]
+
 
 @dataclass
 class TranscriptionResult:
@@ -32,6 +36,9 @@ class TranscriptionResult:
     duration: float
     tempo: float | None = None
     tuning: list[int] = field(default_factory=list)
+    # Semitones the notes were moved from the recording's pitch (voice mode, to fit the
+    # guitar's range).
+    transpose: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +46,7 @@ class TranscriptionResult:
             "duration": self.duration,
             "tempo": self.tempo,
             "tuning": self.tuning,
+            "transpose": self.transpose,
         }
 
 
@@ -68,6 +76,8 @@ class Predictor:
             for section in ("audio", "features"):
                 if tab_cfg[section] != cfg[section]:
                     raise ValueError(f"Tab model uses different '{section}' settings")
+        # The tuning the tab head learned positions in.
+        self.head_tuning = list(((tab_cfg or cfg).get("tab") or {}).get("tuning", []))
 
     @classmethod
     def from_checkpoint(
@@ -91,8 +101,12 @@ class Predictor:
     def tuning(self) -> list[int]:
         return list((self.cfg.get("tab") or {}).get("tuning", []))
 
-    def predict_features(self, features: np.ndarray) -> dict[str, np.ndarray]:
-        """Run the model(s) on ``(bins, T)`` features.
+    def predict_features(
+        self,
+        features: np.ndarray,
+        progress: Callable[[float], None] | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Run the model(s) on ``(bins, T)`` features; ``progress`` gets the done fraction.
 
         Returns sigmoid probabilities ``(T, pitches)`` per pitch head and softmax
         probabilities ``(T, strings, classes)`` for the tab head (from the tab model
@@ -101,13 +115,20 @@ class Predictor:
         x = torch.from_numpy(np.asarray(features, dtype=np.float32))
         if x.shape[1] == 0:
             raise ValueError("Audio is too short to transcribe")
-        probs = self._run(self.model, x)
+        models = 2 if self.tab_model is not None else 1
+        report = progress or (lambda _: None)
+        probs = self._run(self.model, x, lambda f: report(f / models))
         if self.tab_model is not None:
-            probs["tab"] = self._run(self.tab_model, x)["tab"]
+            probs["tab"] = self._run(self.tab_model, x, lambda f: report((1 + f) / models))["tab"]
         return probs
 
     @torch.no_grad()
-    def _run(self, model: nn.Module, x: torch.Tensor) -> dict[str, np.ndarray]:
+    def _run(
+        self,
+        model: nn.Module,
+        x: torch.Tensor,
+        progress: Callable[[float], None] | None = None,
+    ) -> dict[str, np.ndarray]:
         """Chunked inference with context frames on both sides of every chunk."""
         inference = self.cfg["inference"]
         step = int(inference.get("chunk_frames", 1024))
@@ -122,10 +143,17 @@ class Predictor:
             for name, logits in outputs.items():
                 probs = torch.softmax(logits, dim=-1) if name == "tab" else torch.sigmoid(logits)
                 chunks.setdefault(name, []).append(probs[0, keep].float().cpu().numpy())
+            if progress is not None:
+                progress(min(1.0, (start + step) / n_frames))
         return {name: np.concatenate(parts, axis=0) for name, parts in chunks.items()}
 
-    def decode(self, probs: dict[str, np.ndarray]) -> list[Note]:
-        """Probabilities -> note events, with string/fret positions when a tuning is set."""
+    def decode(
+        self, probs: dict[str, np.ndarray], tuning: Sequence[int] | None = None
+    ) -> list[Note]:
+        """Probabilities -> note events, with string/fret positions when a tuning is set.
+
+        ``tuning`` (open strings, capo included) replaces the model's standard tuning.
+        """
         inference, labels = self.cfg["inference"], self.cfg["labels"]
         notes = decode_notes(
             probs["frame"],
@@ -141,10 +169,15 @@ class Predictor:
         tab_cfg = self.cfg.get("tab")
         if not tab_cfg:
             return notes
-        tuning, num_frets = tab_cfg["tuning"], tab_cfg["num_frets"]
+        tuning, num_frets = list(tuning or tab_cfg["tuning"]), tab_cfg["num_frets"]
         if "tab" in probs:
             return assign_positions_from_tab(
-                notes, probs["tab"], frame_rate=self.frame_rate, tuning=tuning, num_frets=num_frets
+                notes,
+                probs["tab"],
+                frame_rate=self.frame_rate,
+                tuning=tuning,
+                num_frets=num_frets,
+                model_tuning=self.head_tuning,
             )
         return assign_tab(notes, tuning, num_frets)
 
@@ -153,22 +186,35 @@ class Predictor:
         audio_path: str | Path,
         estimate_tempo: bool = True,
         separator: Callable[[np.ndarray, int], np.ndarray] | None = None,
+        tuning: Sequence[int] | None = None,
+        progress: ProgressCallback | None = None,
     ) -> TranscriptionResult:
         """Transcribe a file; ``separator`` (e.g. ``GuitarSeparator``) first isolates the
-        guitar from a band mix."""
+        guitar from a band mix. ``tuning``: open strings, capo included (default: the
+        model's standard tuning). ``progress`` follows the job's stages."""
+        report = progress or (lambda fraction, stage: None)
+        # Share of the job before the model runs: separation takes about as long as the rest.
+        model_start = 0.5 if separator is not None else 0.05
         audio = self.cfg["audio"]
         sr = audio["sample_rate"]
+        report(0.0, "loading")
         y = load_audio(audio_path, sr, mono=True, normalize=audio.get("normalize", True))
         if separator is not None:
+            report(0.05, "separating")
             y = separator(y, sr)
-        probs = self.predict_features(compute_features(y, self.cfg))
-        notes = self.decode(probs)
+        report(model_start, "transcribing")
+        probs = self.predict_features(
+            compute_features(y, self.cfg),
+            lambda f: report(model_start + (0.95 - model_start) * f, "transcribing"),
+        )
+        report(0.95, "finishing")
+        notes = self.decode(probs, tuning)
         tempo = _estimate_tempo(probs, y, sr, audio["hop_length"]) if estimate_tempo else None
         if tempo is not None:
             # The bar grid (MusicXML, editor) needs a much finer tempo than the estimate.
             tempo = round(refine_tempo(notes, tempo), 2)
         return TranscriptionResult(
-            notes=notes, duration=len(y) / sr, tempo=tempo, tuning=self.tuning
+            notes=notes, duration=len(y) / sr, tempo=tempo, tuning=list(tuning or self.tuning)
         )
 
 

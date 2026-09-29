@@ -2,6 +2,20 @@ import type { MusicKey } from "@music-transcriber/shared-types";
 
 export const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 export const MAX_FRET = 24;
+export const MAX_CAPO = 12;
+
+// Keep in sync with TUNINGS in packages/music-core/tab.py (tests/test_web_fixtures.py).
+export const TUNINGS: Record<string, { label: string; strings: number[] }> = {
+  standard: { label: "Standart (E A D G B E)", strings: STANDARD_TUNING },
+  half_step_down: { label: "Yarım ton aşağı (Eb)", strings: [39, 44, 49, 54, 58, 63] },
+  full_step_down: { label: "Bir ton aşağı (D G C F A D)", strings: [38, 43, 48, 53, 57, 62] },
+  drop_d: { label: "Drop D (D A D G B E)", strings: [38, 45, 50, 55, 59, 64] },
+  drop_c: { label: "Drop C (C G C F A D)", strings: [36, 43, 48, 53, 57, 62] },
+  c_standard: { label: "C standart (C F Bb Eb G C)", strings: [36, 41, 46, 51, 55, 60] },
+  dadgad: { label: "DADGAD", strings: [38, 45, 50, 55, 57, 62] },
+  open_g: { label: "Open G (D G D G B D)", strings: [38, 43, 50, 55, 59, 62] },
+  open_d: { label: "Open D (D A D F# A D)", strings: [38, 45, 50, 54, 57, 62] },
+};
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BLACK_KEYS = new Set([1, 3, 6, 8, 10]);
