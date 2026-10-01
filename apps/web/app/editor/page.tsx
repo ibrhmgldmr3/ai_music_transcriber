@@ -3,7 +3,18 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Analysis, ModelInfo, Note, Project, Source, Transcription } from "@music-transcriber/shared-types";
+import type {
+  Analysis,
+  ModelInfo,
+  Note,
+  PitchCurve,
+  Project,
+  SongChord,
+  Source,
+  Transcription,
+  Voicing,
+} from "@music-transcriber/shared-types";
+import ChordChart from "@/components/ChordChart";
 import GuitarTab from "@/components/GuitarTab";
 import NotationView from "@/components/NotationView";
 import NoteEditor from "@/components/NoteEditor";
@@ -16,10 +27,14 @@ import {
   STATUS_LABELS,
   analyzeNotes,
   audioUrl,
+  chordSheetUrl,
+  currentVersion,
   errorMessage,
   getModelInfo,
+  getPitchCurve,
   getProject,
   getTranscription,
+  getVoicings,
   isOutdated,
   midiUrl,
   modelLabel,
@@ -29,8 +44,19 @@ import {
   stageLabel,
   tabUrl,
 } from "@/lib/api";
-import { type Drag, applyDrag, copyNotes, deleteNotes, pasteNotes } from "@/lib/editing";
-import { KEY_NAMES, STANDARD_TUNING, beatGrid, defaultPosition, formatTime } from "@/lib/music";
+import {
+  type Drag,
+  applyDrag,
+  copyNotes,
+  deleteNotes,
+  pasteNotes,
+  quantizeNotes,
+  snapToScale,
+} from "@/lib/editing";
+import { KEY_NAMES, STANDARD_TUNING, defaultPosition, formatTime, gridLines } from "@/lib/music";
+import { songBars, strums } from "@/lib/chords";
+import RhythmPattern from "@/components/RhythmPattern";
+import { sungPitch } from "@/lib/pitchCurve";
 import { useSettings } from "@/lib/settings";
 import { useHistory } from "@/lib/useHistory";
 import { renderNotes, useNotePlayer } from "@/lib/synth";
@@ -70,6 +96,8 @@ function Editor() {
   const [beatsPerMeasure, setBeatsPerMeasure] = useState(4);
   const [keyChoice, setKeyChoice] = useState<string | null>(null);
   const [downbeatChoice, setDownbeatChoice] = useState<number | null>(null);
+  // Whether the bar grid follows the beats tracked in the recording (else one tempo).
+  const [beatGrid, setBeatGrid] = useState(true);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [analysisPending, setAnalysisPending] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -83,6 +111,14 @@ function Editor() {
   // Guitar or voice recording, for the next transcription like the tuning below.
   const [source, setSource] = useState<Source>("guitar");
   const [rendering, setRendering] = useState(false);
+  const [pitchCurve, setPitchCurve] = useState<PitchCurve | null>(null);
+  // Song projects: the chords (edited like the notes, saved with them) and their shapes.
+  const [chords, setChords] = useState<SongChord[] | null>(null);
+  const [savedChords, setSavedChords] = useState<SongChord[] | null>(null);
+  const [voicings, setVoicings] = useState<ReadonlyMap<string, Voicing>>(new Map());
+  // Rhythm grid of "Ritmi oturt": 2 = eighths, 4 = sixteenths.
+  const [division, setDivision] = useState(4);
+  const [toolMessage, setToolMessage] = useState<string | null>(null);
   // Tuning and capo for the next transcription; they take effect with "Yeniden çözümle".
   const [tuningName, setTuningName] = useState("standard");
   const [capo, setCapo] = useState(0);
@@ -107,11 +143,14 @@ function Editor() {
       setBeatsPerMeasure(t.beats_per_measure);
       setKeyChoice(t.key);
       setDownbeatChoice(t.downbeat);
+      setBeatGrid(t.beat_grid);
       setNotationDirty(false);
+      setChords(t.chords);
+      setSavedChords(t.chords);
     },
     [resetHistory],
   );
-  const dirty = notes !== savedNotes || notationDirty;
+  const dirty = notes !== savedNotes || notationDirty || chords !== savedChords;
   const primary = selection.length ? selection[selection.length - 1] : null;
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
@@ -133,11 +172,15 @@ function Editor() {
         setSongMode(p.separate_guitar);
         setSource(p.source);
         setTuningName(p.tuning_name);
-        setCapo(p.capo);
+        setCapo(p.capo_auto ? -1 : p.capo);
         if (p.status === "completed") {
-          const t = await getTranscription(id);
+          const [t, curve] = await Promise.all([
+            getTranscription(id),
+            p.source === "voice" ? getPitchCurve(id) : Promise.resolve(null),
+          ]);
           if (cancelled) return;
           applyTranscription(t);
+          setPitchCurve(curve);
           setSelection([]);
         } else if (p.status === "pending" || p.status === "processing") {
           timer = setTimeout(load, 1000);
@@ -160,7 +203,16 @@ function Editor() {
     setAnalysisPending(true);
     const timer = setTimeout(() => {
       analyzeNotes(
-        { notes, tempo, beats_per_measure: beatsPerMeasure, key: keyChoice, downbeat: downbeatChoice },
+        {
+          notes,
+          tempo,
+          beats_per_measure: beatsPerMeasure,
+          key: keyChoice,
+          downbeat: downbeatChoice,
+          project_id: transcription.project_id,
+          beat_grid: beatGrid,
+          duration: Math.max(project?.duration ?? 0, playback.duration || 0),
+        },
         controller.signal,
       )
         .then((result) => {
@@ -178,7 +230,7 @@ function Editor() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [transcription, notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice]);
+  }, [transcription, notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice, beatGrid, project?.duration, playback.duration]);
 
   // Warn before leaving with unsaved edits.
   useEffect(() => {
@@ -197,17 +249,8 @@ function Editor() {
     const values = notes.map((n) => n.confidence).filter((c): c is number => c !== null);
     return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
   }, [notes]);
-  const grid = useMemo(() => {
-    if (!analysis) return null;
-    const firstNote = notes.reduce((min, n) => Math.min(min, n.start), Infinity);
-    return beatGrid(
-      analysis.tempo,
-      analysis.beats_per_measure,
-      analysis.downbeat,
-      Number.isFinite(firstNote) ? firstNote : 0,
-      duration,
-    );
-  }, [analysis, notes, duration]);
+  const grid = useMemo(() => (analysis ? gridLines(analysis) : null), [analysis]);
+  const tracked = (transcription?.beats.length ?? 0) >= 2;
   const clicks = useMemo(
     () => (metronome && grid ? { beats: grid.beats, bars: grid.bars.map((b) => b.time) } : null),
     [metronome, grid],
@@ -225,16 +268,93 @@ function Editor() {
             tuning,
             capo: transcription.capo,
             title: project?.name ?? "Transcription",
+            project_id: transcription.project_id,
+            beat_grid: beatGrid,
           }
         : null,
-    [notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice, tuning, transcription, project?.name],
+    [notes, tempo, beatsPerMeasure, keyChoice, downbeatChoice, tuning, transcription, project?.name, beatGrid],
+  );
+
+  // Shapes and names of the song's chords, from the capo, spelled for the key.
+  const chordLabels = useMemo(() => [...new Set((chords ?? []).map((c) => c.label))].sort().join("|"), [chords]);
+  useEffect(() => {
+    if (!transcription || !chordLabels) return;
+    const controller = new AbortController();
+    getVoicings(
+      {
+        labels: chordLabels.split("|"),
+        capo: transcription.capo,
+        tuning_name: transcription.tuning_name,
+        key: musicKey?.name ?? null,
+      },
+      controller.signal,
+    )
+      .then((list) => setVoicings(new Map(list.map((v) => [v.label, v]))))
+      .catch(() => undefined); // chords show their labels until the next try
+    return () => controller.abort();
+  }, [chordLabels, transcription, musicKey?.name]);
+  // The chord chart's bars are the grid's, so they follow a corrected meter or bar line.
+  const bars = useMemo(
+    () =>
+      chords && transcription
+        ? songBars(
+            chords,
+            analysis ? analysis.bars.map((b) => b.time) : transcription.downbeats,
+            transcription.beats,
+            beatsPerMeasure,
+          )
+        : [],
+    [chords, transcription, analysis, beatsPerMeasure],
+  );
+  const tabChords = useMemo(
+    () => chords?.map((c) => ({ start: c.start, end: c.end, label: voicings.get(c.label)?.shape ?? c.label })),
+    [chords, voicings],
+  );
+  const chordStrums = useMemo(
+    () =>
+      chords && transcription
+        ? strums(chords, analysis?.beats ?? transcription.beats, voicings, tuning, analysis?.rhythm ?? null)
+        : undefined,
+    [chords, transcription, analysis, voicings, tuning],
+  );
+  const relabel = useCallback(
+    (index: number, label: string) =>
+      setChords((current) => current && current.map((c, i) => (i === index ? { ...c, label } : c))),
+    [],
   );
 
   const { setMuted } = playback;
   useEffect(() => setMuted(listen === "notes"), [listen, setMuted]);
-  useNotePlayer({ audio: playback.audio, playing: playback.playing, notes, synth: listen !== "audio", clicks });
+  useNotePlayer({
+    audio: playback.audio,
+    playing: playback.playing,
+    notes,
+    synth: listen !== "audio",
+    clicks,
+    strums: listen !== "audio" ? chordStrums : undefined,
+  });
 
   const { set: setNotes, undo, redo } = history;
+
+  const report = (message: string) => {
+    setToolMessage(message);
+    window.setTimeout(() => setToolMessage((current) => (current === message ? null : current)), 4000);
+  };
+  // Tidy-up for sung (or loosely played) melodies; they work on the selection, or on
+  // every note when nothing is selected, and are undone like any edit.
+  const quantize = () => {
+    if (!analysis) return;
+    const next = quantizeNotes(notes, selection, analysis.beats, division);
+    if (next !== notes) setNotes(next);
+    report(next === notes ? "Notalar zaten ızgarada" : `Ritim 1/${division * 4} ızgaraya oturtuldu`);
+  };
+  const snapScale = () => {
+    if (!musicKey) return;
+    const sung = pitchCurve ? (n: Note) => sungPitch(pitchCurve, n.start, n.end) : undefined;
+    const result = snapToScale(notes, selection, musicKey, tuning, sung);
+    if (result.moved) setNotes(result.notes);
+    report(result.moved ? `${result.moved} nota ${musicKey.name} gamına taşındı` : `${musicKey.name} gamı dışında nota yok`);
+  };
   const updateNote = useCallback(
     (note: Note) => setNotes(notes.map((n, i) => (i === primary ? note : n))),
     [notes, primary, setNotes],
@@ -315,6 +435,8 @@ function Editor() {
           beats_per_measure: beatsPerMeasure,
           key: keyChoice,
           downbeat: downbeatChoice,
+          beat_grid: beatGrid,
+          ...(chords ? { chords } : {}),
         }),
       );
     } catch (err) {
@@ -331,6 +453,7 @@ function Editor() {
     try {
       setProject(await retranscribe(id, { source, separateGuitar: songMode, tuning: tuningName, capo }));
       setTranscription(null);
+      setPitchCurve(null);
       setAnalysis(null);
       resetHistory(NO_NOTES);
       setSavedNotes(NO_NOTES);
@@ -448,7 +571,10 @@ function Editor() {
           <h1>{project?.name ?? "Yükleniyor…"}</h1>
           {project && <span className={`badge ${project.status}`}>{STATUS_LABELS[project.status]}</span>}
           {project?.source === "voice" && <span className="badge">Ses</span>}
-          {project?.separate_guitar && <span className="badge">Şarkı modu</span>}
+          {project?.source === "song" && <span className="badge">Şarkı</span>}
+          {project?.separate_guitar && project.source !== "song" && (
+            <span className="badge">{project.source === "voice" ? "Vokal ayrıldı" : "Gitar ayrıldı"}</span>
+          )}
         </div>
         <div className="row">
           <button className="primary play-button" onClick={toggle}>
@@ -470,6 +596,9 @@ function Editor() {
             { label: "MIDI indir", href: midiUrl(id) },
             { label: "MusicXML indir", href: musicXmlUrl(id), title: "MuseScore / Guitar Pro" },
             { label: "TAB indir", href: tabUrl(id) },
+            ...(project?.source === "song"
+              ? [{ label: "Akor şeması indir", href: chordSheetUrl(id), title: "Ölçü ölçü akorlar ve parmak yerleri (metin)" }]
+              : []),
           ].map(({ label, href, title }) =>
             canExport ? (
               <a key={label} className="button" href={href} title={title}>
@@ -501,16 +630,19 @@ function Editor() {
           <TuningPicker
             tuning={tuningName}
             capo={capo}
+            allowAuto={source === "song"}
             disabled={busy}
             onChange={(nextTuning, nextCapo) => {
               setTuningName(nextTuning);
               setCapo(nextCapo);
             }}
           />
-          <label className="row compact small" title="Başka enstrümanlar da çalan kayıtlar için">
-            <input type="checkbox" checked={songMode} onChange={(e) => setSongMode(e.target.checked)} />
-            {source === "voice" ? "Vokali ayır" : "Gitarı ayır"}
-          </label>
+          {source !== "song" && (
+            <label className="row compact small" title="Başka enstrümanlar da çalan kayıtlar için">
+              <input type="checkbox" checked={songMode} onChange={(e) => setSongMode(e.target.checked)} />
+              {source === "voice" ? "Vokali ayır" : "Gitarı ayır"}
+            </label>
+          )}
           <button onClick={() => void rerun()} disabled={busy || !project}>
             Yeniden çözümle
           </button>
@@ -532,7 +664,7 @@ function Editor() {
       )}
       {project?.status === "failed" && <div className="card error">Çözümleme başarısız: {project.error}</div>}
       {dirty && <p className="muted small">Kaydedilmemiş değişiklikler var. Dışa aktarmadan önce kaydedin.</p>}
-      {project && (project.tuning_name !== tuningName || project.capo !== capo) && (
+      {project && (project.tuning_name !== tuningName || (project.capo_auto ? -1 : project.capo) !== capo) && (
         <p className="muted small">Akort veya capo değişti; tel ve perdeler &quot;Yeniden çözümle&quot; ile güncellenir.</p>
       )}
       {project && project.source !== source && (
@@ -549,7 +681,7 @@ function Editor() {
         <div className="card notice row between">
           <span>
             Bu kayıt {project.model_version ? `eski bir modelle (${modelLabel(project.model_version)})` : "eski bir modelle"}{" "}
-            çözüldü. Güncel model: {modelLabel(models.version)}.
+            çözüldü. Güncel model: {modelLabel(currentVersion(project.source, models))}.
             {project.edited && " Yeniden çözümlerseniz kaydettiğiniz düzenlemeler kaybolur."}
           </span>
           <button onClick={() => void rerun()} disabled={busy}>
@@ -586,8 +718,21 @@ function Editor() {
 
       {transcription && (
         <>
+          {chords && (
+            <ChordChart
+              chords={chords}
+              bars={bars}
+              keys={keyChoice ? [] : analysis?.keys ?? transcription.keys ?? []}
+              voicings={voicings}
+              capo={transcription.capo}
+              currentTime={playback.currentTime}
+              onSeek={playback.seek}
+              onRelabel={relabel}
+            />
+          )}
           <div className="editor-layout">
             <div className="stack">
+              {analysis?.rhythm && <RhythmPattern rhythm={analysis.rhythm} />}
               {settings.showTab && (
                 <GuitarTab
                   notes={notes}
@@ -603,8 +748,8 @@ function Editor() {
                   onSeek={playback.seek}
                   follow={settings.followPlayhead}
                   grid={grid}
-                  chords={analysis?.chords}
-                  chordsStale={analysisPending}
+                  chords={tabChords ?? analysis?.chords}
+                  chordsStale={!tabChords && analysisPending}
                   loop={loop}
                 />
               )}
@@ -623,6 +768,7 @@ function Editor() {
                   grid={grid}
                   loop={loop}
                   musicKey={musicKey}
+                  pitchCurve={pitchCurve}
                 />
               )}
               <p className="muted small">
@@ -660,7 +806,11 @@ function Editor() {
             </span>
             <label
               className="row compact"
-              title="Tahmini tempo. Yanlışsa düzeltin: vuruş ızgarası, metronom, MIDI ve MusicXML ritmi bu tempoya göre."
+              title={
+                tracked && beatGrid
+                  ? "Kayıttaki vuruşların ortanca temposu. Değiştirirseniz ızgara bu sabit tempoya geçer."
+                  : "Tahmini tempo. Yanlışsa düzeltin: vuruş ızgarası, metronom, MIDI ve MusicXML ritmi bu tempoya göre."
+              }
             >
               BPM:
               <input
@@ -673,10 +823,28 @@ function Editor() {
                 onChange={(e) => {
                   const value = e.target.valueAsNumber;
                   if (Number.isNaN(value) || value < MIN_TEMPO || value > MAX_TEMPO) return;
-                  editNotation(() => setTempo(value));
+                  editNotation(() => {
+                    setTempo(value);
+                    setBeatGrid(false); // a typed tempo is one tempo for the whole recording
+                  });
                 }}
               />
             </label>
+            {tracked && (
+              <label
+                className="row compact"
+                title="Vuruş takibi: ızgara, metronom ve dışa aktarma kayıttaki vuruşları izler (metronomsuz, hızlanıp yavaşlayan çalışlarda). Sabit tempo: tek bir BPM."
+              >
+                Izgara:
+                <select
+                  value={beatGrid ? "tracked" : "fixed"}
+                  onChange={(e) => editNotation(() => setBeatGrid(e.target.value === "tracked"))}
+                >
+                  <option value="tracked">Vuruş takibi</option>
+                  <option value="fixed">Sabit tempo</option>
+                </select>
+              </label>
+            )}
             <label className="row compact" title="Ölçüdeki vuruş sayısı (dörtlük vuruş)">
               Ölçü:
               <select
@@ -718,6 +886,26 @@ function Editor() {
                 <button onClick={() => editNotation(() => setDownbeatChoice(null))}>Otomatik</button>
               )}
             </span>
+            <span
+              className="row compact"
+              title="Seçili notaların (seçim yoksa hepsinin) başını ve sonunu vuruş ızgarasına oturtur"
+            >
+              <button onClick={quantize} disabled={!analysis || !notes.length}>
+                Ritmi oturt
+              </button>
+              <select value={division} onChange={(e) => setDivision(Number(e.target.value))} aria-label="Izgara">
+                <option value={2}>1/8</option>
+                <option value={4}>1/16</option>
+              </select>
+            </span>
+            <button
+              onClick={snapScale}
+              disabled={!musicKey || !notes.length}
+              title="Tonun gamı dışında kalan seçili notaları (seçim yoksa hepsini) yarım ton yandaki gam notasına taşır; ses projelerinde söylenen perdeye göre yön seçilir"
+            >
+              Gama oturt
+            </button>
+            {toolMessage && <span className="muted small">{toolMessage}</span>}
             {analysisError && <span className="error small">Analiz yapılamadı: {analysisError}</span>}
           </div>
         </>

@@ -1804,49 +1804,5 @@
     "C7"
    ]
   }
- },
- "first_bars": [
-  {
-   "tempo": 120.0,
-   "beats_per_measure": 4,
-   "downbeat": 0.0,
-   "first_note": 0.0,
-   "bar1_time": 0.0
-  },
-  {
-   "tempo": 120.0,
-   "beats_per_measure": 4,
-   "downbeat": 0.3,
-   "first_note": 0.05,
-   "bar1_time": -1.7
-  },
-  {
-   "tempo": 120.0,
-   "beats_per_measure": 4,
-   "downbeat": 1.7,
-   "first_note": 0.4,
-   "bar1_time": -0.3
-  },
-  {
-   "tempo": 97.5,
-   "beats_per_measure": 3,
-   "downbeat": 0.9,
-   "first_note": 2.6,
-   "bar1_time": 0.9
-  },
-  {
-   "tempo": 60.0,
-   "beats_per_measure": 4,
-   "downbeat": 1.0,
-   "first_note": 0.0,
-   "bar1_time": -3.0
-  },
-  {
-   "tempo": 140.0,
-   "beats_per_measure": 7,
-   "downbeat": 0.21,
-   "first_note": 5.3,
-   "bar1_time": 3.21
-  }
- ]
+ }
 }

@@ -4,23 +4,27 @@ The score has one guitar part with two staves: treble clef (sounding an octave l
 as guitar music is written) and a six-line TAB staff carrying each note's string and
 fret. MuseScore, Guitar Pro (File > Import) and most notation programs open it.
 
-Rhythm: onsets are snapped to a 16th-note grid at the given tempo, with bar lines where
-``music_core.analysis`` puts them (or at the given downbeat). Each event (a note or
-chord) lasts until its notes end or the next event starts, whichever comes first; gaps
-become rests and notes crossing a barline are tied. The key signature, note spelling
-and chord symbols come from the same analysis.
+Rhythm: onsets are snapped to 16th notes of the beat grid (``music_core.analysis``:
+one tempo, or beats tracked in the recording), with bar lines where the analysis puts
+them (or at the given downbeat). Each event (a note or chord) lasts until its notes end
+or the next event starts, whichever comes first; gaps become rests and notes crossing a
+barline are tied. When the tracked beats speed up or slow down, measures carry the new
+tempo for playback (and a visible mark when it moved more than 8 %). The key signature,
+note spelling and chord symbols come from the same analysis, or from the song's keys.
 """
 
 from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 
-from music_core.analysis import Chord, Key, analyze, spell
+from music_core.analysis import Chord, Key, KeySpan, analyze, spell
+from music_core.guitar_chords import QUALITIES
 from music_core.notes import Note, sort_notes
 from music_core.tab import STANDARD_TUNING
+from music_core.timing import BeatGrid
 
 DIVISIONS = 4  # grid units per quarter note -> 16th-note resolution
 GUITAR_MIDI_PROGRAM = 26  # 1-based General MIDI "Acoustic Guitar (steel)"
@@ -46,6 +50,12 @@ _HARMONY_KINDS = {
     "sus2": "suspended-second",
     "sus4": "suspended-fourth",
     "dim": "diminished",
+    "maj6": "major-sixth",
+    "min6": "minor-sixth",
+    "dim7": "diminished-seventh",
+    "hdim7": "half-diminished",
+    "aug": "augmented",
+    "minmaj7": "major-minor",
 }
 
 DOCTYPE = (
@@ -71,23 +81,45 @@ def notes_to_musicxml(
     key: Key | None = None,
     downbeat: float | None = None,
     capo: int = 0,
+    chords: Sequence[Chord] | None = None,
+    beats: Sequence[float] | None = None,
+    downbeats: Sequence[float] | None = None,
+    keys: Sequence[KeySpan] | None = None,
+    chord_scores: Sequence[dict] | None = None,
 ) -> bytes:
     """Build a MusicXML 4.0 document (UTF-8 bytes) from positioned notes.
 
-    ``key`` and ``downbeat`` (the time of any bar line, seconds) override the estimates.
-    With a capo, ``tuning`` includes it, so the TAB staff's frets count from the capo
-    (the way it is played) in any program, and "Capo N" is written above the first bar.
+    ``key`` and ``downbeat`` (the time of any bar line, seconds) override the estimates,
+    ``chords`` the chord symbols found in the notes (e.g. chords recognized in a song).
+    ``beats`` / ``downbeats`` (tracked in the recording) replace the single ``tempo``.
+    ``keys`` (a song's keys over time) change the key signature where they change,
+    unless ``key`` is given; ``chord_scores`` are fused with the notes' chords as in
+    ``analyze``. With a capo, ``tuning`` includes it, so the TAB staff's frets count
+    from the capo (the way it is played) in any program, and "Capo N" is written above
+    the first bar.
     """
     if not (math.isfinite(tempo) and tempo > 0):
         tempo = 120.0
     notes = [n for n in notes if n.end > n.start]
-    analysis = analyze(notes, tempo, beats_per_measure, key=key, downbeat=downbeat)
+    symbols_end = max((c.end for c in chords or []), default=None)
+    analysis = analyze(
+        notes, tempo, beats_per_measure, key=key, downbeat=downbeat,
+        beats=beats, downbeats=downbeats, end=symbols_end, keys=keys,
+        chord_scores=chord_scores if chords is None else None,
+    )  # fmt: skip
+    grid = analysis.grid
     measure_units = DIVISIONS * beats_per_measure
-    unit = 60.0 / tempo / DIVISIONS  # seconds per grid unit
-    origin = _first_bar_line(notes, analysis.downbeat, unit, measure_units)
+    origin = first_bar_line(notes, grid)  # beat index of measure 1's bar line
 
-    events = _quantize(notes, unit, origin)
+    def to_units(time: float) -> int:
+        """Grid units (16ths) from measure 1's bar line."""
+        return round(float(grid.position(time)) * DIVISIONS) - origin * DIVISIONS
+
+    events = _quantize(notes, to_units)
     total_units = events[-1].start + events[-1].length if events else 0
+    symbols = analysis.chords if chords is None else chords
+    if symbols:  # chords may go on after the last note (a song's outro)
+        total_units = max(total_units, to_units(max(c.end for c in symbols)))
     n_measures = max(1, math.ceil(total_units / measure_units))
     measures: list[list[tuple[int, list[Note], bool, bool]]] = [[] for _ in range(n_measures)]
     for event in events:
@@ -101,10 +133,22 @@ def notes_to_musicxml(
             content.append((units, [], False, False))
 
     harmonies: list[list[tuple[int, Chord]]] = [[] for _ in range(n_measures)]
-    for chord in analysis.chords:
-        position = max(0, round((chord.start - origin) / unit))
+    for chord in symbols:
+        position = max(0, to_units(chord.start))
         if position < n_measures * measure_units:
             harmonies[position // measure_units].append((position % measure_units, chord))
+
+    def bar_time(index: int) -> float:
+        return float(grid.time(origin + index * beats_per_measure))
+
+    def measure_key(index: int) -> Key | None:
+        if key is not None or not keys:
+            return analysis.key
+        start = bar_time(index) + 1e-3
+        return next((s.key for s in keys if s.start <= start < s.end), keys[-1].key)
+
+    def measure_tempo(index: int) -> float:
+        return 60.0 * beats_per_measure / (bar_time(index + 1) - bar_time(index))
 
     root = ET.Element("score-partwise", version="4.0")
     ET.SubElement(ET.SubElement(root, "work"), "work-title").text = title
@@ -119,13 +163,26 @@ def notes_to_musicxml(
     ET.SubElement(midi, "midi-program").text = str(GUITAR_MIDI_PROGRAM)
 
     part = ET.SubElement(root, "part", id="P1")
+    written_key, sounding_tempo, shown_tempo = None, 0.0, 0.0
     for index, content in enumerate(measures):
         measure = ET.SubElement(part, "measure", number=str(index + 1))
+        this_key = measure_key(index)
+        local = measure_tempo(index) if analysis.tracked else tempo
         if index == 0:
-            _write_attributes(measure, tuning, analysis.key, beats_per_measure)
-            _write_tempo(measure, tempo)
+            _write_attributes(measure, tuning, this_key, beats_per_measure)
+            _write_tempo(measure, local)
+            sounding_tempo = shown_tempo = local
             if capo:
                 _write_words(measure, f"Capo {capo}")
+        else:
+            if this_key != written_key:
+                _write_key_change(measure, this_key)
+            if abs(local - sounding_tempo) > 0.02 * sounding_tempo:
+                visible = abs(local - shown_tempo) > 0.08 * shown_tempo
+                _write_tempo(measure, local, visible)
+                sounding_tempo = local
+                shown_tempo = local if visible else shown_tempo
+        written_key = this_key
         for staff, voice in ((1, "1"), (2, "5")):
             if staff == 2:
                 ET.SubElement(ET.SubElement(measure, "backup"), "duration").text = str(
@@ -133,43 +190,46 @@ def notes_to_musicxml(
                 )
             pending = sorted(harmonies[index], key=lambda h: h[0]) if staff == 1 else []
             position = 0
-            for units, event_notes, tie_start, tie_stop in content:
-                while pending and pending[0][0] < position + units:
+            for length, event_notes, tie_start, tie_stop in content:
+                while pending and pending[0][0] < position + length:
                     at, chord = pending.pop(0)
-                    _write_harmony(measure, chord, analysis.key, max(0, at - position))
+                    _write_harmony(measure, chord, this_key, max(0, at - position))
                 _write_event(
-                    measure, units, event_notes, tie_start, tie_stop, staff, voice, tuning,
-                    analysis.key, measure_units,
+                    measure, length, event_notes, tie_start, tie_stop, staff, voice, tuning,
+                    this_key, measure_units,
                 )  # fmt: skip
-                position += units
+                position += length
 
     ET.indent(root)
     body = ET.tostring(root, encoding="unicode")
     return f'<?xml version="1.0" encoding="UTF-8"?>\n{DOCTYPE}\n{body}\n'.encode()
 
 
-def _first_bar_line(
-    notes: Sequence[Note], downbeat: float, unit: float, measure_units: int
-) -> float:
-    """The last bar line at or before the first (quantized) onset: measure 1 starts there."""
+def first_bar_line(notes: Sequence[Note], grid: BeatGrid) -> int:
+    """Beat index of the last bar line at or before the first (quantized) onset: measure 1
+    starts there (the first bar line at or after 0 s without notes)."""
     if not notes:
-        return downbeat
-    first = round((min(n.start for n in notes) - downbeat) / unit)
-    return downbeat + (first // measure_units) * measure_units * unit
+        beat = next((i for i, t in enumerate(grid.beats) if t >= -1e-9), 0)
+    else:
+        sixteenth = round(float(grid.position(min(n.start for n in notes))) * DIVISIONS)
+        beat = sixteenth // DIVISIONS
+    while not grid.is_bar_line(beat):
+        beat -= 1
+    return beat
 
 
-def _quantize(notes: Sequence[Note], unit: float, origin: float) -> list[_Event]:
+def _quantize(notes: Sequence[Note], to_units: Callable[[float], int]) -> list[_Event]:
     """Snap onsets to the grid and build a gap-free sequence of note/chord/rest events."""
     cells: dict[int, list[Note]] = {}
     for note in sort_notes(notes):
-        cells.setdefault(max(0, round((note.start - origin) / unit)), []).append(note)
+        cells.setdefault(max(0, to_units(note.start)), []).append(note)
 
     starts = sorted(cells)
     events: list[_Event] = []
     cursor = 0
     for i, start in enumerate(starts):
         members = _one_per_string(cells[start])
-        end = max(start + 1, round((max(n.end for n in members) - origin) / unit))
+        end = max(start + 1, to_units(max(n.end for n in members)))
         if i + 1 < len(starts):
             end = min(end, starts[i + 1])
         if start > cursor:
@@ -251,13 +311,25 @@ def _write_words(measure: ET.Element, text: str) -> None:
     ET.SubElement(direction, "staff").text = "1"
 
 
-def _write_tempo(measure: ET.Element, tempo: float) -> None:
+def _write_tempo(measure: ET.Element, tempo: float, visible: bool = True) -> None:
+    """A tempo for playback, shown as a metronome mark when ``visible``."""
+    if not visible:
+        ET.SubElement(measure, "sound", tempo=f"{tempo:.2f}")
+        return
     direction = ET.SubElement(measure, "direction", placement="above")
     metronome = ET.SubElement(ET.SubElement(direction, "direction-type"), "metronome")
     ET.SubElement(metronome, "beat-unit").text = "quarter"
     ET.SubElement(metronome, "per-minute").text = str(round(tempo))
     ET.SubElement(direction, "staff").text = "1"
     ET.SubElement(direction, "sound", tempo=f"{tempo:.2f}")
+
+
+def _write_key_change(measure: ET.Element, key: Key | None) -> None:
+    attributes = ET.SubElement(measure, "attributes")
+    key_element = ET.SubElement(attributes, "key")
+    ET.SubElement(key_element, "fifths").text = str(key.fifths if key else 0)
+    if key:
+        ET.SubElement(key_element, "mode").text = key.mode
 
 
 def _write_harmony(measure: ET.Element, chord: Chord, key: Key | None, offset: int) -> None:
@@ -268,7 +340,8 @@ def _write_harmony(measure: ET.Element, chord: Chord, key: Key | None, offset: i
     ET.SubElement(root, "root-step").text = step
     if alter:
         ET.SubElement(root, "root-alter").text = str(alter)
-    ET.SubElement(harmony, "kind", text=chord.suffix).text = _HARMONY_KINDS[chord.quality]
+    suffix = QUALITIES[chord.quality][1]
+    ET.SubElement(harmony, "kind", text=suffix).text = _HARMONY_KINDS[chord.quality]
     if chord.bass is not None:
         bass = ET.SubElement(harmony, "bass")
         step, alter = spell(chord.bass, key)

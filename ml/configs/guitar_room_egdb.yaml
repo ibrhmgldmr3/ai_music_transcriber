@@ -1,0 +1,18 @@
+# guitar_room.yaml plus EGDB for the note model: its labels' onsets aligned to a note
+# model's onsets (scripts/align_egdb.py; the clips that don't match their audio left
+# out), and its amplifier tones also rendered through simulated rooms.
+#
+#   python scripts/align_egdb.py --checkpoint ml/checkpoints/guitar_v9/best.pt
+#   python scripts/prepare_dataset.py --dataset egdb_aligned --augment --variants room
+#   python scripts/mix_splits.py --out ml/data/splits/mixed_room_egdb \
+#       guitarset=ml/data/splits/guitarset_fx guitarset=ml/data/splits/guitarset_room \
+#       guitar_techs=ml/data/splits/guitar_techs egdb_aligned=ml/data/splits/egdb_aligned
+#
+# guitar_v10 = guitar_v9 fine-tuned on this mix:
+#   python scripts/train.py --config ml/configs/guitar_room_egdb.yaml \
+#       --init ml/checkpoints/guitar_v9/best.pt --set training.lr=2e-4 training.epochs=20
+extends: guitar_mixed_low.yaml
+
+paths:
+  splits_dir: ml/data/splits/mixed_room_egdb
+  checkpoint_dir: ml/checkpoints/guitar_room_egdb

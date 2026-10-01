@@ -119,6 +119,143 @@ def phone_quality(y: np.ndarray, sample_rate: int, rng: np.random.Generator) -> 
     return np.pad(narrow, (0, len(y) - len(narrow))).astype(y.dtype)
 
 
+def room_impulse_response(
+    sample_rate: int,
+    rng: np.random.Generator,
+    distance_range: Sequence[float] = (0.5, 3.0),
+    rt60_range: Sequence[float] = (0.2, 0.8),
+    max_order: int = 14,
+) -> np.ndarray:
+    """Impulse response from a guitar (or amp) to a microphone in a simulated room.
+
+    A shoebox room of living-room to rehearsal-room size (image-source method,
+    pyroomacoustics), walls absorbing for a reverberation time in ``rt60_range``, the
+    microphone ``distance_range`` meters away. Unlike ``add_reverb``'s noise tail it has
+    early reflections and a direct-to-reverberant ratio set by the distance, which is
+    what separates a room microphone from a close one. The direct sound is at sample 0.
+    """
+    import pyroomacoustics as pra
+
+    size = np.array([rng.uniform(3.0, 8.0), rng.uniform(2.5, 6.0), rng.uniform(2.4, 3.5)])
+    rt60 = rng.uniform(*rt60_range)
+    absorption, order = pra.inverse_sabine(rt60, size)
+    room = pra.ShoeBox(
+        size,
+        fs=sample_rate,
+        materials=pra.Material(min(absorption, 0.99)),
+        max_order=min(order, max_order),
+        air_absorption=True,
+    )
+    margin = 0.4
+    source = np.array(
+        [rng.uniform(margin, size[0] - margin), rng.uniform(margin, size[1] - margin), 0.0]
+    )
+    source[2] = rng.uniform(0.4, 1.3)  # amp on the floor up to a seated guitar
+    for _ in range(100):  # a microphone position inside the room at about the distance
+        direction = rng.normal(size=3) * np.array([1.0, 1.0, 0.3])
+        mic = source + rng.uniform(*distance_range) * direction / np.linalg.norm(direction)
+        if np.all(mic > margin) and np.all(mic < size - margin):
+            break
+    else:
+        mic = np.clip(source + np.array([distance_range[0], 0.0, 0.3]), margin, size - margin)
+    room.add_source(source)
+    room.add_microphone(mic)
+    room.compute_rir()
+    rir = np.asarray(room.rir[0][0], dtype=np.float64)
+    direct = int(np.argmax(np.abs(rir[: int(0.05 * sample_rate)])))
+    rir = rir[direct:]
+    return rir / (np.abs(rir).max() + 1e-12)
+
+
+def room_mic(
+    y: np.ndarray,
+    sample_rate: int,
+    rng: np.random.Generator,
+    distance_range: Sequence[float] = (0.5, 3.0),
+    rt60_range: Sequence[float] = (0.2, 0.8),
+    noise_snr_db: Sequence[float] = (20.0, 40.0),
+) -> np.ndarray:
+    """A recording through a microphone in a room: the room's impulse response, the
+    microphone's coloring (low cut, uneven response, rolled-off highs) and room noise."""
+    from scipy.signal import butter, fftconvolve, sosfilt
+
+    wet = fftconvolve(y, room_impulse_response(sample_rate, rng, distance_range, rt60_range))
+    wet = wet[: len(y)]
+    wet = sosfilt(
+        butter(2, rng.uniform(60.0, 200.0), "highpass", fs=sample_rate, output="sos"), wet
+    )
+    wet = sosfilt(
+        butter(2, rng.uniform(7000.0, 14000.0), "lowpass", fs=sample_rate, output="sos"), wet
+    )
+    wet = random_eq(wet.astype(np.float32), sample_rate, rng, max_db=4.0)
+    # Room noise is not white: pink-ish (1/f) noise, from a cumulative sum of white noise
+    # mixed with white noise.
+    noise = np.cumsum(rng.normal(size=len(wet)))
+    noise -= np.convolve(noise, np.ones(512) / 512, mode="same")  # keep it zero-mean
+    noise = noise / (noise.std() + 1e-12) + 0.3 * rng.normal(size=len(wet))
+    signal_power = float(np.mean(wet**2)) + 1e-12
+    snr = rng.uniform(*noise_snr_db)
+    noise *= np.sqrt(signal_power / 10 ** (snr / 10) / (np.mean(noise**2) + 1e-12))
+    out = wet + noise
+    peak = float(np.max(np.abs(out))) or 1.0
+    return (out / peak * (float(np.max(np.abs(y))) or 1.0)).astype(y.dtype)
+
+
+# (ffmpeg encoder, container, bitrates in kbit/s): voice memos, messaging apps, web audio.
+_CODECS = [
+    ("libopus", "ogg", (12, 16, 24, 32, 48)),
+    ("aac", "adts", (32, 48, 64, 96)),
+    ("libmp3lame", "mp3", (32, 48, 64, 96)),
+]
+
+
+def codec(y: np.ndarray, sample_rate: int, rng: np.random.Generator) -> np.ndarray:
+    """Lossy compression at a low bitrate (Opus, AAC or MP3, through ffmpeg), as in phone
+    voice memos and messaging apps. The result is aligned back to the input sample by
+    sample, since encoders add a delay."""
+    import io
+    import subprocess
+
+    import soundfile as sf
+
+    encoder, container, bitrates = _CODECS[int(rng.integers(len(_CODECS)))]
+    bitrate = int(rng.choice(bitrates))
+    peak = float(np.max(np.abs(y))) or 1.0
+    wav = io.BytesIO()
+    sf.write(wav, (y / peak * 0.9).astype(np.float32), sample_rate, format="WAV", subtype="PCM_16")
+    encoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "wav", "-i", "pipe:0", "-c:a", encoder,
+         "-b:a", f"{bitrate}k", "-ac", "1", "-f", container, "pipe:1"],
+        input=wav.getvalue(), capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", "pipe:0", "-f", "f32le", "-ac", "1",
+         "-ar", str(sample_rate), "pipe:1"],
+        input=encoded, capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    out = np.frombuffer(decoded, dtype=np.float32).astype(np.float64)
+    lag = _lag(y, out, int(0.1 * sample_rate))
+    out = out[lag:] if lag >= 0 else np.pad(out, (-lag, 0))
+    out = np.pad(out, (0, max(0, len(y) - len(out))))[: len(y)]
+    return (out / 0.9 * peak).astype(y.dtype)
+
+
+def _lag(reference: np.ndarray, other: np.ndarray, max_lag: int, width: int = 88200) -> int:
+    """Samples by which ``other`` lags ``reference`` (within ``max_lag``), from an excerpt
+    of ``width`` samples around the loudest moment."""
+    from scipy.signal import correlate
+
+    n = min(len(reference), len(other))
+    width = min(n, width)
+    if width <= 2 * max_lag:
+        return 0
+    center = int(np.argmax(np.abs(reference[:n])))
+    start = int(np.clip(center - width // 2, 0, n - width))
+    corr = correlate(other[start : start + width], reference[start : start + width], method="fft")
+    zero = width - 1  # index of lag 0 in the full correlation
+    return int(np.argmax(corr[zero - max_lag : zero + max_lag + 1])) - max_lag
+
+
 def echo(
     y: np.ndarray,
     sample_rate: int,
@@ -192,8 +329,9 @@ def apply_variant(
     """Apply one offline augmentation variant (see ``offline_augmentation`` in base.yaml).
 
     Effects run in signal-chain order: pitch/tempo, guitar effects (distortion, echo),
-    room (reverb), tone (eq), recording device (phone), noise and gain. ``reverb`` may
-    be ``true`` or a dict of ``add_reverb`` keyword arguments.
+    room (reverb, or a simulated room and microphone), tone (eq), recording device
+    (phone), noise, lossy compression (codec) and gain. ``reverb`` and ``room`` may be
+    ``true`` or a dict of ``add_reverb`` / ``room_mic`` keyword arguments.
     """
     notes = list(notes)
     if variant.get("pitch_shift"):
@@ -211,12 +349,17 @@ def apply_variant(
     if variant.get("reverb"):
         options = variant["reverb"] if isinstance(variant["reverb"], dict) else {}
         y = add_reverb(y, sample_rate, rng, **options)
+    if variant.get("room"):
+        options = variant["room"] if isinstance(variant["room"], dict) else {}
+        y = room_mic(y, sample_rate, rng, **options)
     if variant.get("eq"):
         y = random_eq(y, sample_rate, rng)
     if variant.get("phone"):
         y = phone_quality(y, sample_rate, rng)
     if variant.get("noise_snr_db"):
         y = add_noise(y, rng, variant["noise_snr_db"])
+    if variant.get("codec"):
+        y = codec(y, sample_rate, rng)
     if variant.get("gain_db"):
         y = random_gain(y, rng, float(variant["gain_db"]))
     return y.astype(np.float32), notes

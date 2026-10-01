@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -12,6 +12,7 @@ import mido
 
 from music_core.analysis import Key
 from music_core.notes import Note, sort_notes
+from music_core.timing import BeatGrid
 
 TICKS_PER_BEAT = 480
 GUITAR_PROGRAM = 25  # General MIDI "Acoustic Guitar (steel)", 0-based
@@ -29,39 +30,47 @@ def notes_to_midi(
     channel: int = 0,
     key: Key | None = None,
     beats_per_measure: int = 4,
+    grid: BeatGrid | None = None,
 ) -> mido.MidiFile:
     """Build a single-track MIDI file from notes (times in seconds).
 
     Note times are kept as they are, so the file lines up with the recording; the key
-    and time signature are informational.
+    and time signature are informational. With a ``grid`` (e.g. tracked beats), a tempo
+    map makes the file's beats and bars fall on the grid's: whatever comes before the
+    first bar line is a pickup measure of whole beats.
     """
     if not (math.isfinite(tempo) and tempo > 0):
         tempo = 120.0  # an unusable tempo estimate must not break the export
     mid = mido.MidiFile(ticks_per_beat=TICKS_PER_BEAT)
     track = mido.MidiTrack()
     mid.tracks.append(track)
-    track.append(mido.MetaMessage("set_tempo", tempo=int(mido.bpm2tempo(tempo)), time=0))
-    track.append(
-        mido.MetaMessage("time_signature", numerator=beats_per_measure, denominator=4, time=0)
-    )
+    if grid is None:
+        to_ticks = lambda seconds: _seconds_to_ticks(seconds, tempo)  # noqa: E731
+        meta = [
+            (0, _set_tempo(tempo)),
+            (0, mido.MetaMessage("time_signature", numerator=beats_per_measure, denominator=4)),
+        ]
+    else:
+        to_ticks, meta = _tempo_map(grid)
     if key is not None:
         name = key.tonic_name + ("m" if key.mode == "minor" else "")
-        track.append(mido.MetaMessage("key_signature", key=name, time=0))
-    track.append(mido.Message("program_change", program=program, channel=channel, time=0))
+        meta.append((0, mido.MetaMessage("key_signature", key=name)))
+    meta.append((0, mido.Message("program_change", program=program, channel=channel)))
 
-    # (tick, order, message): note_off (0) sorts before note_on (1) on the same tick.
-    events: list[tuple[int, int, mido.Message]] = []
+    # (tick, order, message): meta (0) and note_off (1) sort before note_on (2); the
+    # sort is stable, so events of one kind keep their order.
+    events: list[tuple[int, int, mido.Message]] = [(tick, 0, message) for tick, message in meta]
     for note in notes:
         if note.end <= note.start:
             continue
         pitch = min(max(int(note.pitch), 0), 127)
         velocity = min(max(int(note.velocity), 1), 127)
-        on = _seconds_to_ticks(note.start, tempo)
-        off = max(on + 1, _seconds_to_ticks(note.end, tempo))
+        on = to_ticks(note.start)
+        off = max(on + 1, to_ticks(note.end))
         events.append(
-            (on, 1, mido.Message("note_on", note=pitch, velocity=velocity, channel=channel))
+            (on, 2, mido.Message("note_on", note=pitch, velocity=velocity, channel=channel))
         )
-        events.append((off, 0, mido.Message("note_off", note=pitch, velocity=0, channel=channel)))
+        events.append((off, 1, mido.Message("note_off", note=pitch, velocity=0, channel=channel)))
     events.sort(key=lambda e: (e[0], e[1]))
 
     last_tick = 0
@@ -70,6 +79,47 @@ def notes_to_midi(
         last_tick = tick
     track.append(mido.MetaMessage("end_of_track", time=0))
     return mid
+
+
+def _tempo_map(grid: BeatGrid) -> tuple[Callable[[float], int], list[tuple[int, mido.Message]]]:
+    """Seconds -> ticks along ``grid``, and its tempo and time signature events.
+
+    Tick 0 stays 0 s. The time before the first bar line at or after 0 s becomes a pickup
+    of whole beats (at least one) at its own tempo; from that bar line on, every beat of
+    the grid is one MIDI beat at the beat's tempo.
+    """
+    n = grid.beats_per_measure
+    start = float(grid.position(0.0))
+    first_bar = next(
+        i for i in range(math.ceil(start - 1e-6), math.ceil(start) + n + 1) if grid.is_bar_line(i)
+    )
+    bar_time = float(grid.time(first_bar))
+    span = first_bar - start  # beats before the first bar line
+    pickup = 0 if span < 1e-3 else max(1, round(span))
+    events: list[tuple[int, mido.Message]] = []
+    if pickup:
+        events.append((0, _set_tempo(60.0 * pickup / bar_time)))
+        if pickup != n:
+            events.append((0, mido.MetaMessage("time_signature", numerator=pickup, denominator=4)))
+    offset = pickup * TICKS_PER_BEAT
+    events.append((offset, mido.MetaMessage("time_signature", numerator=n, denominator=4)))
+    last_bpm = None
+    for index in range(first_bar, len(grid.beats)):
+        bpm = grid.tempo_at(index)
+        if last_bpm is None or abs(bpm - last_bpm) > 0.05:
+            events.append((offset + (index - first_bar) * TICKS_PER_BEAT, _set_tempo(bpm)))
+            last_bpm = bpm
+
+    def to_ticks(seconds: float) -> int:
+        if seconds < bar_time and pickup:
+            return int(round(seconds / bar_time * offset))
+        return offset + int(round((float(grid.position(seconds)) - first_bar) * TICKS_PER_BEAT))
+
+    return to_ticks, events
+
+
+def _set_tempo(bpm: float) -> mido.MetaMessage:
+    return mido.MetaMessage("set_tempo", tempo=int(round(mido.bpm2tempo(bpm))))
 
 
 def write_midi(
@@ -87,10 +137,16 @@ def notes_to_midi_bytes(
     program: int = GUITAR_PROGRAM,
     key: Key | None = None,
     beats_per_measure: int = 4,
+    grid: BeatGrid | None = None,
 ) -> bytes:
     buffer = io.BytesIO()
     midi = notes_to_midi(
-        notes, tempo=tempo, program=program, key=key, beats_per_measure=beats_per_measure
+        notes,
+        tempo=tempo,
+        program=program,
+        key=key,
+        beats_per_measure=beats_per_measure,
+        grid=grid,
     )
     midi.save(file=buffer)
     return buffer.getvalue()

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MusicKey } from "@music-transcriber/shared-types";
-import { KEY_NAMES, TUNINGS, beatGrid, midiToName, playablePositions, STANDARD_TUNING } from "./music";
+import { KEY_NAMES, TUNINGS, beatPosition, beatTime, gridLines, midiToName, playablePositions, STANDARD_TUNING } from "./music";
 
 // Written by the Python implementation: python tests/test_web_fixtures.py
 interface Fixture {
@@ -10,7 +10,6 @@ interface Fixture {
   tunings: Record<string, number[]>;
   midi_range: [number, number];
   spelling: Record<string, { tonic: number | null; mode: "major" | "minor" | null; fifths: number; names: string[] }>;
-  first_bars: { tempo: number; beats_per_measure: number; downbeat: number; first_note: number; bar1_time: number }[];
 }
 const fixture: Fixture = JSON.parse(
   readFileSync(resolve(__dirname, "../../../tests/fixtures/music_web.json"), "utf-8"),
@@ -35,30 +34,30 @@ describe("mirrors music_core", () => {
     }
   });
 
-  it("numbers bars like the MusicXML measures", () => {
-    for (const c of fixture.first_bars) {
-      const bar = (60 / c.tempo) * c.beats_per_measure;
-      const grid = beatGrid(c.tempo, c.beats_per_measure, c.downbeat, c.first_note, c.first_note + 30);
-      // Bar 1 can start before the recording (a pickup), and the grid only has lines from
-      // 0 s on; then bar 2 is checked. Lines before bar 1 are numbered 0, -1, ...
-      const number = c.bar1_time < -1e-9 ? 2 : 1;
-      const line = grid.bars.find((b) => b.number === number);
-      expect(line?.time).toBeCloseTo(c.bar1_time + (number - 1) * bar, 6);
-      expect(grid.bars.every((b) => b.number < 1 || b.time >= c.bar1_time - 1e-9)).toBe(true);
-    }
-  });
 });
 
-describe("beatGrid", () => {
-  it("puts bar lines every bar and beats in between", () => {
-    const grid = beatGrid(120, 4, 0.25, 0.25, 4.3);
-    expect(grid.bars.map((b) => b.time)).toEqual([0.25, 2.25, 4.25]);
-    expect(grid.bars.map((b) => b.number)).toEqual([1, 2, 3]);
-    expect(grid.beats).toEqual([0.75, 1.25, 1.75, 2.75, 3.25, 3.75]);
+describe("grid", () => {
+  it("draws the analysis' beats between its numbered bar lines", () => {
+    const grid = gridLines({
+      beats: [0.25, 0.75, 1.25, 1.75, 2.25],
+      bars: [
+        { time: 0.25, number: 1 },
+        { time: 2.25, number: 2 },
+      ],
+    });
+    expect(grid.beats).toEqual([0.75, 1.25, 1.75]);
+    expect(grid.bars.map((b) => b.number)).toEqual([1, 2]);
   });
 
-  it("is empty for an unusable tempo", () => {
-    expect(beatGrid(0, 4, 0, 0, 10)).toEqual({ beats: [], bars: [] });
+  it("converts between time and beat position on drifting beats", () => {
+    const beats = [1, 1.5, 2.1, 2.8];
+    expect(beatPosition(beats, 1.8)).toBeCloseTo(1.5);
+    expect(beatTime(beats, 1.5)).toBeCloseTo(1.8);
+    // Past the ends at the edge beats' tempo.
+    expect(beatPosition(beats, 0.75)).toBeCloseTo(-0.5);
+    expect(beatTime(beats, 4)).toBeCloseTo(3.5);
+    for (const t of [0.3, 1.2, 2.5, 3.9]) expect(beatTime(beats, beatPosition(beats, t))).toBeCloseTo(t);
+    expect(beatPosition([1], 2)).toBeNaN();
   });
 });
 

@@ -36,8 +36,11 @@ def sing(
             continue
         pitch[seg] = p
         amp[seg] = 1.0
-        notes.append(Note(p, float(start), float(end)))
         previous = melody[i - 1][0] if i else None
+        # A note reached by a slide starts when the slide arrives (as labeled in
+        # Annotated-VocalSet).
+        onset = start + glide / 2 if previous is not None and previous != p else start
+        notes.append(Note(p, float(onset), float(end)))
         if previous is not None and previous != p:  # legato glide into the note
             ramp = (t >= start - glide / 2) & (t < start + glide / 2)
             pitch[ramp] = previous + (p - previous) * (t[ramp] - (start - glide / 2)) / glide
@@ -110,3 +113,16 @@ def test_transcribe_voice_places_the_notes_on_the_guitar(tmp_path):
     assert result.tuning == [38, 43, 48, 53, 57, 62] and result.transpose == 0
     assert result.duration == pytest.approx(len(y) / SR)
     assert stages[0] == "loading" and "transcribing" in stages and stages[-1] == "finishing"
+
+
+def test_pitch_curve_follows_the_notes_scale_and_is_silent_in_rests():
+    from ml.inference.voice import pitch_curve, track_pitch
+
+    y, _ = sing(MELODY, detune=0.3)
+    curve = pitch_curve(track_pitch(y), transpose=-12)
+    rate, values = curve["frame_rate"], curve["values"]
+    assert rate == 50 and len(values) == pytest.approx(len(y) / SR * rate, abs=1)
+    at = lambda t: values[int(t * rate)]  # noqa: E731
+    assert at(0.25) == pytest.approx(60 - 12, abs=0.4)  # tuning removed, octave moved
+    assert at(1.9) is None  # the rest
+    assert at(2.3) == pytest.approx(67 - 12, abs=0.4)

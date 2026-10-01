@@ -37,6 +37,12 @@ _ADDED_COLUMNS = [
     ("projects", "stage", "VARCHAR(32)"),
     ("projects", "source", "VARCHAR(16) NOT NULL DEFAULT 'guitar'"),
     ("projects", "transpose", "INTEGER NOT NULL DEFAULT 0"),
+    ("projects", "pitch_curve", "JSON"),
+    ("projects", "capo_auto", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("projects", "chords", "JSON"),
+    ("projects", "beats", "JSON"),
+    ("projects", "keys", "JSON"),
+    ("projects", "beat_grid", "BOOLEAN NOT NULL DEFAULT TRUE"),
 ]
 
 

@@ -25,6 +25,7 @@ export default function AudioUploader() {
   const [name, setName] = useState("");
   const [source, setSource] = useState<Source>("guitar");
   const voice = source === "voice";
+  const song = source === "song";
   const [separateGuitar, setSeparateGuitar] = useState(false);
   const [tuning, setTuning] = useState("standard");
   const [capo, setCapo] = useState(0);
@@ -131,12 +132,22 @@ export default function AudioUploader() {
               name="source"
               value={key}
               checked={source === key}
-              onChange={() => setSource(key)}
+              onChange={() => {
+                setSource(key);
+                // A song gets the capo that makes its chords easiest, unless one is chosen.
+                setCapo((current) => (key === "song" && current === 0 ? -1 : key !== "song" && current < 0 ? 0 : current));
+              }}
             />
             {SOURCE_LABELS[key]}
           </label>
         ))}
       </fieldset>
+      {song && (
+        <p className="muted small">
+          Bir şarkının akorları ölçü ölçü, akor şemaları ve kolay şekiller için önerilen capo ile çıkar; vokal ayrılıp
+          melodisi de TAB olarak yazılır. Editörde akorları değiştirip melodiyle birlikte dinleyebilirsiniz.
+        </p>
+      )}
       {voice && (
         <p className="muted small">
           Tek bir melodiyi söyleyin, mırıldanın ya da ıslıkla çalın: notalar, seçtiğiniz akortta gitar TAB&apos;ına
@@ -163,7 +174,7 @@ export default function AudioUploader() {
           </>
         ) : (
           <>
-            <strong>{voice ? "Ses kaydını" : "Gitar kaydını"} buraya sürükleyin</strong>
+            <strong>{song ? "Şarkıyı" : voice ? "Ses kaydını" : "Gitar kaydını"} buraya sürükleyin</strong>
             <span className="muted">veya seçmek için tıklayın · {ACCEPTED.join(" ")} · en fazla {MAX_MB} MB</span>
           </>
         )}
@@ -209,6 +220,7 @@ export default function AudioUploader() {
         <TuningPicker
           tuning={tuning}
           capo={capo}
+          allowAuto={song}
           onChange={(nextTuning, nextCapo) => {
             setTuning(nextTuning);
             setCapo(nextCapo);
@@ -216,21 +228,25 @@ export default function AudioUploader() {
         />
       </div>
 
-      <label className="row compact">
-        <input
-          type="checkbox"
-          checked={separateGuitar}
-          onChange={(e) => setSeparateGuitar(e.target.checked)}
-        />
-        {voice
-          ? "Müzik eşliğinde söylenmiş: önce vokali diğer enstrümanlardan ayır"
-          : "Şarkı / grup kaydı: önce gitarı diğer enstrümanlardan ayır"}
-      </label>
-      <p className="muted small">
-        {voice
-          ? "Arkada müzik çalıyorsa açın. Ses tek başınaysa gerekmez; çözümleme biraz uzar."
-          : "Kayıtta davul, bas veya vokal varsa açın. Yalnız gitar kayıtlarında gerekmez; çözümleme biraz uzar."}
-      </p>
+      {!song && (
+        <>
+          <label className="row compact">
+            <input
+              type="checkbox"
+              checked={separateGuitar}
+              onChange={(e) => setSeparateGuitar(e.target.checked)}
+            />
+            {voice
+              ? "Müzik eşliğinde söylenmiş: önce vokali diğer enstrümanlardan ayır"
+              : "Grup kaydı: önce gitarı diğer enstrümanlardan ayır"}
+          </label>
+          <p className="muted small">
+            {voice
+              ? "Arkada müzik çalıyorsa açın. Ses tek başınaysa gerekmez; çözümleme biraz uzar."
+              : "Kayıtta davul, bas veya vokal varsa açın. Yalnız gitar kayıtlarında gerekmez; çözümleme biraz uzar."}
+          </p>
+        </>
+      )}
 
       {uploading && (
         <div className="progress" aria-label="Yükleme ilerlemesi">

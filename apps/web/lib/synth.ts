@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import type { Note } from "@music-transcriber/shared-types";
+import type { Strum } from "./chords";
 
 /** Seconds of media time scheduled ahead of the playhead. */
 const LOOKAHEAD = 0.2;
 const TICK_MS = 25;
 const PLUCK_SECONDS = 2.5;
 const RELEASE = 0.04; // time constant of the fade after a note ends
+const STRUM_SPREAD = 0.012; // seconds between strings in a strum
+const STRUM_LEVEL = 0.07;
+const UPSTROKE_LEVEL = 0.7; // of a downstroke's
+const STRUM_RING = 0.45; // seconds a strummed chord rings
 
 /** Playback gain of a note; the velocity shapes it only a little, like picking harder. */
 const noteLevel = (velocity: number) => 0.12 + 0.28 * (velocity / 127);
@@ -85,6 +90,8 @@ export interface NotePlayerOptions {
   synth: boolean;
   /** Metronome clicks; bar lines get an accent. */
   clicks: { beats: number[]; bars: number[] } | null;
+  /** Chord strums (song projects), quieter than the melody. */
+  strums?: Strum[];
 }
 
 /**
@@ -95,12 +102,12 @@ export interface NotePlayerOptions {
  * `now + (event - mediaTime) / playbackRate`. A seek, loop jump or rate change
  * cancels what was scheduled and starts over from the new position.
  */
-export function useNotePlayer({ audio, playing, notes, synth, clicks }: NotePlayerOptions) {
+export function useNotePlayer({ audio, playing, notes, synth, clicks, strums }: NotePlayerOptions) {
   const ctxRef = useRef<AudioContext | null>(null);
   const buffers = useRef(new Map<string, AudioBuffer>());
 
   useEffect(() => {
-    if (!audio || !playing || (!synth && !clicks)) return;
+    if (!audio || !playing || (!synth && !clicks && !strums?.length)) return;
     const ctx = ctxRef.current ?? new AudioContext();
     ctxRef.current = ctx;
     void ctx.resume();
@@ -147,6 +154,23 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks }: NotePlay
             ),
         });
       }
+    }
+    for (const strum of strums ?? []) {
+      // An upstroke hits the high strings first, and usually more lightly.
+      const order = strum.down ? strum.pitches : [...strum.pitches].reverse();
+      const level = strum.down ? STRUM_LEVEL : STRUM_LEVEL * UPSTROKE_LEVEL;
+      events.push({
+        time: strum.time,
+        play: (when, rate) =>
+          order.forEach((pitch, i) =>
+            voice(
+              bufferFor(`n${pitch}`, () => pluck(ctx, pitch)),
+              when + (i * STRUM_SPREAD) / rate,
+              level,
+              when + STRUM_RING / rate,
+            ),
+          ),
+      });
     }
     if (clicks) {
       for (const [times, accent] of [
@@ -216,7 +240,7 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks }: NotePlay
       window.clearInterval(timer);
       silence();
     };
-  }, [audio, playing, synth, clicks, notes]);
+  }, [audio, playing, synth, clicks, notes, strums]);
 
   useEffect(
     () => () => {

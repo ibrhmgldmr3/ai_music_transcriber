@@ -30,6 +30,12 @@ TEST_SETS = [
         (f"EGDB {tone}", "egdb", "egdb/test", f"_{tone}")
         for tone in ("DI", "Marshall", "Ftwin", "Mesa", "JCjazz", "Plexi")
     ],
+    # The same unseen clips with their onsets aligned (scripts/align_egdb.py), clips that
+    # don't match their audio left out.
+    *[
+        (f"EGDB hizalı {tone}", "egdb_aligned", "egdb_aligned/test", f"_{tone}")
+        for tone in ("DI", "Marshall", "Ftwin", "Mesa", "JCjazz", "Plexi")
+    ],
     *[
         (f"Guitar-TECHS {version}", "guitar_techs", "guitar_techs/test", f"_{version}")
         for version in ("di", "amp", "ego", "exo")

@@ -114,35 +114,44 @@ export function formatTime(seconds: number): string {
 }
 
 export interface BeatGrid {
-  /** Beat times (seconds) within the recording. */
+  /** Beat times (seconds) within the recording, bar lines left out. */
   beats: number[];
   /** Bar lines with 1-based bar numbers, matching the MusicXML measures. */
   bars: { time: number; number: number }[];
 }
 
 /**
- * Beats and bar lines from the tempo and a bar line time, numbered like the MusicXML
- * export: bar 1 is the last bar line at or before the first note.
+ * The analysis' grid for drawing: the beats between the bar lines and the numbered bar
+ * lines. The API places them (one tempo, or beats tracked in the recording) and numbers
+ * the bars as the MusicXML export does.
  */
-export function beatGrid(
-  tempo: number,
-  beatsPerMeasure: number,
-  downbeat: number,
-  firstNote: number,
-  duration: number,
-): BeatGrid {
-  const beat = 60 / tempo;
-  const bar = beat * beatsPerMeasure;
-  if (!(beat > 0) || !Number.isFinite(duration)) return { beats: [], bars: [] };
-  const firstBar = Math.floor((firstNote - downbeat + beat / 8) / bar);
-  const beats: number[] = [];
-  const bars: BeatGrid["bars"] = [];
-  const startIndex = Math.ceil(-downbeat / beat);
-  for (let i = startIndex; downbeat + i * beat <= duration; i++) {
-    const time = downbeat + i * beat;
-    const inBar = ((i % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure;
-    if (inBar === 0) bars.push({ time, number: Math.floor(i / beatsPerMeasure) - firstBar + 1 });
-    else beats.push(time);
+export function gridLines(analysis: { beats: number[]; bars: BeatGrid["bars"] }): BeatGrid {
+  const lines = new Set(analysis.bars.map((b) => b.time));
+  return { beats: analysis.beats.filter((t) => !lines.has(t)), bars: analysis.bars };
+}
+
+/** Fractional beat index of `time` among increasing `beats` (linear past both ends). */
+export function beatPosition(beats: number[], time: number): number {
+  const n = beats.length;
+  if (n < 2) return NaN;
+  if (time <= beats[0]) return (time - beats[0]) / (beats[1] - beats[0]);
+  if (time >= beats[n - 1]) return n - 1 + (time - beats[n - 1]) / (beats[n - 1] - beats[n - 2]);
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (beats[mid] <= time) lo = mid;
+    else hi = mid;
   }
-  return { beats, bars };
+  return lo + (time - beats[lo]) / (beats[hi] - beats[lo]);
+}
+
+/** The time at a fractional beat index (inverse of `beatPosition`). */
+export function beatTime(beats: number[], position: number): number {
+  const n = beats.length;
+  if (n < 2) return NaN;
+  if (position <= 0) return beats[0] + position * (beats[1] - beats[0]);
+  if (position >= n - 1) return beats[n - 1] + (position - n + 1) * (beats[n - 1] - beats[n - 2]);
+  const i = Math.floor(position);
+  return beats[i] + (position - i) * (beats[i + 1] - beats[i]);
 }

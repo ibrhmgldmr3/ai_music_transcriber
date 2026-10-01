@@ -7,10 +7,12 @@ interface TuningPickerProps {
   capo: number;
   onChange: (tuning: string, capo: number) => void;
   disabled?: boolean;
+  /** Offer "Otomatik" (-1): the transcription picks the capo (songs). */
+  allowAuto?: boolean;
 }
 
 /** The guitar's tuning and capo: they decide which string and fret play each note. */
-export default function TuningPicker({ tuning, capo, onChange, disabled }: TuningPickerProps) {
+export default function TuningPicker({ tuning, capo, onChange, disabled, allowAuto }: TuningPickerProps) {
   return (
     <>
       <label className="row compact" title="Gitarın akordu: notaların hangi tel ve perdede çalındığını belirler">
@@ -26,6 +28,7 @@ export default function TuningPicker({ tuning, capo, onChange, disabled }: Tunin
       <label className="row compact" title="Capo'lu çalımda perdeler capodan itibaren sayılır">
         Capo
         <select value={capo} disabled={disabled} onChange={(e) => onChange(tuning, Number(e.target.value))}>
+          {allowAuto && <option value={-1}>Otomatik (kolay akorlar)</option>}
           {Array.from({ length: MAX_CAPO + 1 }, (_, fret) => (
             <option key={fret} value={fret}>
               {fret === 0 ? "Yok" : `${fret}. perde`}

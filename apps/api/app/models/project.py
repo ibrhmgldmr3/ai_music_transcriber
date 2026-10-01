@@ -2,9 +2,9 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, Integer, String, Text, false
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, Integer, String, Text, false, true
 from sqlalchemy.engine import Dialect
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, deferred, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from app.models.database import Base
@@ -56,8 +56,9 @@ class Project(Base):
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus), default=ProjectStatus.pending
     )
-    # What was recorded: "guitar" (the transcription model) or "voice" (a sung, hummed or
-    # whistled melody, ml.inference.voice), which is then set for guitar.
+    # What was recorded: "guitar" (the transcription model), "voice" (a sung, hummed or
+    # whistled melody, ml.inference.voice) or "song" (a whole song: its chords and sung
+    # melody, ml.inference.song), the last two then set for guitar.
     source: Mapped[str] = mapped_column(String(16), default="guitar", server_default="guitar")
     # Song mode: isolate the guitar (voice: the vocals) from a band mix before transcribing.
     separate_guitar: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
@@ -67,6 +68,8 @@ class Project(Base):
         String(32), default="standard", server_default="standard"
     )
     capo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Song projects: the transcription picks the capo that makes the chords easiest.
+    capo_auto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # Models that produced the transcription (services.transcription.model_version) and
     # whether the user has saved edits since, which a new transcription would discard.
     model_version: Mapped[str | None] = mapped_column(String(96), nullable=True)
@@ -81,6 +84,20 @@ class Project(Base):
     # Semitones the notes were moved from the recording (voice: octaves, to fit the guitar).
     transpose: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     notes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Voice mode: the sung pitch the editor draws behind the notes (TranscriptionResult.
+    # pitch_curve). Loaded only when asked for: it can hold tens of thousands of values.
+    pitch_curve: Mapped[dict | None] = deferred(mapped_column(JSON, nullable=True))
+    # Song projects: chords [{start, end, label}] (Harte labels, editable) and their keys
+    # over time [{start, end, key}] when the song modulates.
+    chords: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    keys: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Tracked in the recording (guitar and song projects): {"beats": [...], "downbeats":
+    # [...]}, guitar projects' "chord_scores" (the chord recognizer's best labels per beat,
+    # fused with the notes) and song projects' "strums" ([time, strength] of the
+    # accompaniment, for the strumming pattern). Loaded only when asked for.
+    beats: Mapped[dict | None] = deferred(mapped_column(JSON, nullable=True))
+    # Whether the bar grid follows the tracked beats (else one tempo, `tempo`).
+    beat_grid: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     # Notation, set by the user; None means estimated from the notes (music_core.analysis).
     beats_per_measure: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
     key_name: Mapped[str | None] = mapped_column(String(16), nullable=True)  # "A minor"

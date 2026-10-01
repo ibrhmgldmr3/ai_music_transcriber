@@ -19,9 +19,11 @@ python -m ml.inference.voice melody.wav --tab melody.txt
 from __future__ import annotations
 
 import argparse
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -32,9 +34,10 @@ from music_core.notes import Note
 from music_core.tab import DEFAULT_NUM_FRETS, STANDARD_TUNING, assign_tab
 
 # Stored as the project's model_version; bump it when the method changes notes.
-VOICE_VERSION = "voice-pyin@1"
+VOICE_VERSION = "voice-pyin@2"
 
 Piece = tuple[int, int, int]  # start frame, end frame, MIDI pitch
+CURVE_RATE = 50  # frames per second of the pitch curve the editor draws
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,9 @@ class VoiceSettings:
     change_window: float = 0.2  # seconds of pitch averaged on each side of a cut
     change_threshold: float = 0.7  # semitones between those means that make a new note
     stable_tolerance: float = 0.5  # semitones from the note where its pitch counts as settled
+    # A note reached by a slide from the previous one starts when the slide arrives:
+    # this close to the pitch the note is actually sung at (its median).
+    arrival_tolerance: float = 0.2
     # A re-attack on one pitch: spectral change (onset strength relative to the
     # recording's strong onsets) plus dips in voicing probability and loudness that, in
     # these units, add up to 1.
@@ -139,23 +145,52 @@ def estimate_tuning(midi: np.ndarray, weights: np.ndarray | None = None) -> floa
     return offset if offset < 0.5 else offset - 1.0
 
 
+def sung_pitch(track: PitchTrack, s: VoiceSettings = VoiceSettings()) -> np.ndarray:
+    """The pitch per frame counted from the singer's own tuning; NaN where nothing is
+    sung (unvoiced, or far quieter than the loud parts)."""
+    midi, loudness = track.midi, track.loudness_db
+    voiced = np.isfinite(midi)
+    if not voiced.any():
+        return midi
+    loud = float(np.percentile(loudness[voiced], 95))
+    midi = np.where(voiced & (loudness > loud - s.silence_db), midi, np.nan)
+    return midi - estimate_tuning(midi, track.voiced_prob)
+
+
+def pitch_curve(
+    track: PitchTrack, s: VoiceSettings = VoiceSettings(), transpose: int = 0
+) -> dict[str, Any]:
+    """The sung pitch at ``CURVE_RATE`` frames per second, on the notes' scale, for the
+    editor to draw behind them."""
+    step = max(1, int(round(s.frame_rate / CURVE_RATE)))
+    midi = sung_pitch(track, s)
+    blocks = midi[: len(midi) // step * step].reshape(-1, step)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # silent blocks: all NaN
+        values = np.nanmedian(blocks, axis=1) + transpose
+    return {
+        "frame_rate": s.frame_rate / step,
+        "values": [round(float(v), 2) if np.isfinite(v) else None for v in values],
+    }
+
+
 def segment_notes(track: PitchTrack, s: VoiceSettings = VoiceSettings()) -> list[Note]:
     """Pitch track -> notes with whole-semitone pitches, as sung (no octave shift)."""
-    midi, loudness = track.midi, track.loudness_db
+    midi, loudness = sung_pitch(track, s), track.loudness_db
     voiced = np.isfinite(midi)
     if not voiced.any():
         return []
     loud = float(np.percentile(loudness[voiced], 95))
-    voiced &= loudness > loud - s.silence_db
-    midi = np.where(voiced, midi, np.nan)
-    midi = midi - estimate_tuning(midi, track.voiced_prob)
     onset = track.onset / max(float(np.percentile(track.onset[voiced], 95)), 1e-6)
 
     shortest = max(1, int(round(s.min_note * s.frame_rate)))
     notes: list[Note] = []
     for lo, hi in _runs(voiced, bridge=int(round(s.max_gap * s.frame_rate))):
-        for a, b, pitch in _absorb_short(_pieces(midi[lo:hi], shortest, s), shortest):
+        pieces = _absorb_short(_pieces(midi[lo:hi], shortest, s), shortest)
+        for j, (a, b, pitch) in enumerate(pieces):
             a, b = _settled(midi[lo:hi], a, b, pitch, s.stable_tolerance)
+            if j:  # legato: entered by a slide from the previous note
+                a = _arrival(midi[lo:hi], a, b, s.arrival_tolerance, shortest)
             if b - a < shortest:
                 continue
             span = slice(lo + a, lo + b)
@@ -212,11 +247,11 @@ def transcribe_voice(
         report(0.05, "separating")
         y = separator(y, s.sample_rate)
     report(track_start, "transcribing")
-    notes = voice_notes(
+    track = track_pitch(
         y, s, lambda f: report(track_start + (0.95 - track_start) * f, "transcribing")
     )
     report(0.95, "finishing")
-    notes, transpose = fit_to_range(notes, min(tuning), max(tuning) + num_frets)
+    notes, transpose = fit_to_range(segment_notes(track, s), min(tuning), max(tuning) + num_frets)
     notes = assign_tab(notes, tuning, num_frets)
     tempo = _tempo(notes, y, s) if estimate_tempo else None
     return TranscriptionResult(
@@ -225,6 +260,7 @@ def transcribe_voice(
         tempo=tempo,
         tuning=tuning,
         transpose=transpose,
+        pitch_curve=pitch_curve(track, s, transpose),
     )
 
 
@@ -326,6 +362,23 @@ def _settled(midi: np.ndarray, a: int, b: int, pitch: int, tolerance: float) -> 
     """Frames ``[a, b)`` trimmed to where the pitch is within ``tolerance`` of the note."""
     near = np.flatnonzero(np.abs(midi[a:b] - pitch) <= tolerance)  # NaN compares False
     return (a + int(near[0]), a + int(near[-1]) + 1) if near.size else (a, a)
+
+
+def _arrival(midi: np.ndarray, a: int, b: int, tolerance: float, shortest: int) -> int:
+    """First frame of ``[a, b)`` within ``tolerance`` of the note's sung (median) pitch
+    or past it (vibrato may swing around the pitch from the start), leaving the note at
+    least ``shortest`` frames."""
+    frames = midi[a:b]
+    finite = np.flatnonzero(np.isfinite(frames))
+    if not finite.size:
+        return a
+    offset = frames - np.nanmedian(frames)
+    side = np.sign(offset[finite[0]])  # where the slide comes from
+    with np.errstate(invalid="ignore"):
+        arrived = (np.abs(offset) <= tolerance) | (np.sign(offset) == -side)
+    near = np.flatnonzero(arrived)
+    near = near[near <= b - a - shortest]
+    return a + int(near[0]) if near.size else a
 
 
 def _split_reattacks(

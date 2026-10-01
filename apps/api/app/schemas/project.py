@@ -7,7 +7,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from app.config import settings
 from app.models.project import ProjectStatus
 from music_core.analysis import KEY_NAMES
-from music_core.tab import TUNINGS
+from music_core.guitar_chords import ChordSymbol
+from music_core.tab import MAX_CAPO, TUNINGS
 
 MAX_NOTE_SECONDS = 6 * 3600.0  # far beyond max_audio_minutes; bounds MIDI/tab export sizes
 MAX_STRINGS = 12
@@ -24,8 +25,8 @@ def _known_key(value: str | None) -> str | None:
 
 KeyName = Annotated[str | None, AfterValidator(_known_key)]
 TuningName = Literal[tuple(TUNINGS)]  # type: ignore[valid-type]
-# What was recorded: a guitar, or a voice (sung, hummed or whistled melody).
-SourceName = Literal["guitar", "voice"]
+# What was recorded: a guitar, a voice (sung, hummed or whistled melody) or a whole song.
+SourceName = Literal["guitar", "voice", "song"]
 Tempo = Annotated[float | None, Field(ge=MIN_TEMPO, le=MAX_TEMPO)]
 BeatsPerMeasure = Annotated[int, Field(ge=MIN_BEATS, le=MAX_BEATS)]
 Downbeat = Annotated[float | None, Field(ge=0, le=MAX_NOTE_SECONDS)]
@@ -52,6 +53,36 @@ class NoteSchema(BaseModel):
         return self
 
 
+class KeySpanOut(BaseModel):
+    """A song's key over a stretch of time, e.g. {"start": 0, "end": 92.4, "key": "A minor"}."""
+
+    start: float
+    end: float
+    key: str
+
+
+class SongChord(BaseModel):
+    """A chord of a song project, e.g. {"start": 1.5, "end": 3.0, "label": "A:min7"}, or
+    a slash chord in Harte syntax, "D:maj/3" (D over F#)."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    start: float = Field(ge=0, le=MAX_NOTE_SECONDS)
+    end: float = Field(ge=0, le=MAX_NOTE_SECONDS)
+    label: str = Field(max_length=16)  # Harte syntax: root, ':' and a quality
+
+    @model_validator(mode="after")
+    def _check(self) -> "SongChord":
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        try:
+            if ChordSymbol.parse(self.label) is None:
+                raise ValueError
+        except ValueError:
+            raise ValueError("not a chord label") from None
+        return self
+
+
 class ProjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,6 +94,7 @@ class ProjectOut(BaseModel):
     separate_guitar: bool
     tuning_name: str
     capo: int
+    capo_auto: bool
     # Models that transcribed it (null before this was recorded) and whether the user
     # saved edits since.
     model_version: str | None
@@ -79,9 +111,17 @@ class ProjectOut(BaseModel):
 
 class ModelInfo(BaseModel):
     version: str  # compare with ProjectOut.model_version of guitar projects
-    voice_version: str  # ... and of voice projects
+    voice_version: str  # ... of voice projects
+    song_version: str  # ... and of song projects
     notes_model: str  # checkpoint folder, e.g. "guitar_v8"
     tab_model: str | None
+
+
+class PitchCurveOut(BaseModel):
+    """The sung pitch of a voice project, on the notes' scale."""
+
+    frame_rate: float  # values per second, the first at 0 s
+    values: list[float | None]  # MIDI pitch (fractional), None where nothing is sung
 
 
 class TranscriptionOut(BaseModel):
@@ -94,6 +134,15 @@ class TranscriptionOut(BaseModel):
     # Semitones the notes were moved from the recording (voice mode fits the melody
     # into the guitar's range by octaves).
     transpose: int
+    capo_auto: bool
+    # Song projects: the chords and their keys over time (when the song modulates).
+    chords: list[SongChord] | None
+    keys: list[KeySpanOut] | None
+    # The beats and bar lines tracked in the recording (guitar and song projects), and
+    # whether the bar grid follows them (else the one tempo above).
+    beats: list[float]
+    downbeats: list[float]
+    beat_grid: bool
     mean_confidence: float | None
     notes: list[NoteSchema]
     # Notation chosen by the user; null key/downbeat mean "estimate from the notes".
@@ -117,6 +166,10 @@ class NotesUpdate(BaseModel):
     beats_per_measure: BeatsPerMeasure | None = None
     key: KeyName = None
     downbeat: Downbeat = None
+    # Song projects: the edited chords (omitted: unchanged).
+    chords: list[SongChord] | None = Field(default=None, max_length=5000)
+    # Whether the bar grid follows the tracked beats (omitted: unchanged).
+    beat_grid: bool | None = None
 
 
 class AnalysisRequest(BaseModel):
@@ -127,6 +180,11 @@ class AnalysisRequest(BaseModel):
     beats_per_measure: BeatsPerMeasure = 4
     key: KeyName = None  # null: estimate
     downbeat: Downbeat = None  # null: estimate
+    # The project the notes belong to: its tracked beats (with ``beat_grid``), recognized
+    # chords, keys and strums join the analysis. Without one, the notes alone are used.
+    project_id: str | None = Field(default=None, max_length=36)
+    beat_grid: bool = True
+    duration: float | None = Field(default=None, ge=0, le=MAX_NOTE_SECONDS)  # grid's extent
 
 
 class RenderRequest(AnalysisRequest):
@@ -145,16 +203,54 @@ class KeyOut(BaseModel):
     fifths: int  # key signature: sharps > 0, flats < 0
 
 
+class VoicingRequest(BaseModel):
+    """Chord labels to name and finger, e.g. a song's chords with a capo."""
+
+    labels: list[str] = Field(max_length=500)
+    capo: int = Field(default=0, ge=0, le=MAX_CAPO)
+    tuning_name: TuningName = "standard"
+    key: KeyName = None  # spells the names (Bb or A#)
+
+
+class VoicingOut(BaseModel):
+    label: str
+    name: str  # the chord as it sounds, e.g. "Cm"
+    shape: str  # what to play from the capo, e.g. "Am" with a capo at 3
+    frets: list[int] | None  # per string, lowest first; -1 muted, 0 open; null: no shape
+    difficulty: float | None
+
+
 class ChordOut(BaseModel):
     start: float
     end: float
     label: str  # "F#m7", "D/F#"
 
 
+class BarOut(BaseModel):
+    time: float
+    number: int  # as the MusicXML export numbers its measures (1: the first note's bar)
+
+
+class RhythmOut(BaseModel):
+    """The strumming pattern: struck eighths or sixteenths of a bar."""
+
+    per_beat: int  # 2: eighths, 4: sixteenths
+    pattern: list[bool]  # the song's bar: struck slots
+    text: str  # e.g. "D-DU-UDU": D down, U up (the pendulum rule), - not struck
+    bars: list[list[bool]]  # every bar's struck slots, from ``bar_times``
+    bar_times: list[float]
+
+
 class AnalysisOut(BaseModel):
-    tempo: float
+    tempo: float  # with tracked beats: of the median beat
     beats_per_measure: int
-    downbeat: float  # a bar line in [0, bar length); bar lines repeat every bar
+    downbeat: float  # the first bar line at or after 0 s
     key: KeyOut | None  # the chosen key, else the estimate
     estimated_key: KeyOut | None
     chords: list[ChordOut]
+    # The grid: every beat (bar lines included) and the bar lines, numbered.
+    tracked: bool  # following the tracked beats rather than one tempo
+    beats: list[float]
+    bars: list[BarOut]
+    keys: list[KeySpanOut]  # a song's keys over time
+    rhythm: RhythmOut | None

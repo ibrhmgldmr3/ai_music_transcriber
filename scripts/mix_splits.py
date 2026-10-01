@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     for split, names in mixed.items():
+        names = list(dict.fromkeys(names))  # two split dirs of one dataset share files
         (args.out / f"{split}.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
         print(f"{'mixed':<14} {split:<5} {len(names):5d}")
 

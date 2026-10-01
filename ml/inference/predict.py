@@ -39,6 +39,9 @@ class TranscriptionResult:
     # Semitones the notes were moved from the recording's pitch (voice mode, to fit the
     # guitar's range).
     transpose: int = 0
+    # Voice mode: the sung pitch to draw behind the notes, {"frame_rate": fps, "values":
+    # [MIDI pitch or None when silent, ...]}, on the notes' scale (tuning and transpose).
+    pitch_curve: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +50,7 @@ class TranscriptionResult:
             "tempo": self.tempo,
             "tuning": self.tuning,
             "transpose": self.transpose,
+            "pitch_curve": self.pitch_curve,
         }
 
 
@@ -193,12 +197,27 @@ class Predictor:
         guitar from a band mix. ``tuning``: open strings, capo included (default: the
         model's standard tuning). ``progress`` follows the job's stages."""
         report = progress or (lambda fraction, stage: None)
+        audio = self.cfg["audio"]
+        report(0.0, "loading")
+        y = load_audio(
+            audio_path, audio["sample_rate"], mono=True, normalize=audio.get("normalize", True)
+        )
+        return self.transcribe_signal(y, estimate_tempo, separator, tuning, report)
+
+    def transcribe_signal(
+        self,
+        y: np.ndarray,
+        estimate_tempo: bool = True,
+        separator: Callable[[np.ndarray, int], np.ndarray] | None = None,
+        tuning: Sequence[int] | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> TranscriptionResult:
+        """``transcribe`` for mono audio at the model's sample rate (``cfg.audio``)."""
+        report = progress or (lambda fraction, stage: None)
         # Share of the job before the model runs: separation takes about as long as the rest.
         model_start = 0.5 if separator is not None else 0.05
         audio = self.cfg["audio"]
         sr = audio["sample_rate"]
-        report(0.0, "loading")
-        y = load_audio(audio_path, sr, mono=True, normalize=audio.get("normalize", True))
         if separator is not None:
             report(0.05, "separating")
             y = separator(y, sr)

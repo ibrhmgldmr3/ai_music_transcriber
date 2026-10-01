@@ -68,6 +68,8 @@ def client():
 @pytest.fixture(autouse=True)
 def fake_model(monkeypatch):
     monkeypatch.setattr(transcription, "get_predictor", lambda: FakePredictor())
+    # No beat tracker or chord recognizer by default: one tempo, as without the models.
+    monkeypatch.setattr(transcription, "_recording_analysis", lambda path: None)
 
 
 def upload(client, data: bytes, filename: str = "take.wav", **kwargs):
@@ -269,7 +271,8 @@ def test_model_version_follows_the_checkpoint_file(tmp_path, monkeypatch):
     transcription.model_version.cache_clear()
     try:
         first = transcription.model_version()
-        assert first.startswith("guitar_vX@") and "+" not in first
+        assert first.startswith("guitar_vX@") and first.endswith("+" + transcription.GUITAR_METHOD)
+        assert first.count("+") == 1  # one checkpoint and the method
         checkpoint.write_bytes(b"retrained weights")
         transcription.model_version.cache_clear()
         assert transcription.model_version() != first
@@ -483,6 +486,13 @@ def test_voice_recordings_are_transcribed_without_the_guitar_model(client):
     assert transcription["tuning"] == [38, 45, 50, 55, 59, 64]
     assert transcription["transpose"] == 0
     assert client.get("/api/models").json()["voice_version"] == VOICE_VERSION
+    curve = client.get(f"/api/projects/{project['id']}/pitch").json()
+    assert curve["frame_rate"] == 50 and len(curve["values"]) == 50
+    assert sum(v is not None and abs(v - 64) < 0.5 for v in curve["values"]) > 40
+    # Guitar projects have none; a list of projects doesn't carry it.
+    guitar = upload(client, wav_bytes()).json()["id"]
+    assert client.get(f"/api/projects/{guitar}/pitch").status_code == 404
+    assert all("pitch_curve" not in p for p in client.get("/api/projects").json())
 
 
 def test_retranscribe_can_switch_between_guitar_and_voice(client, monkeypatch):
@@ -566,6 +576,7 @@ def test_existing_database_gets_new_columns(client):
         "stage",
         "source",
         "transpose",
+        "pitch_curve",
     )
     with engine.begin() as connection:  # simulate a database from the first release
         for column in added:
@@ -577,3 +588,189 @@ def test_existing_database_gets_new_columns(client):
     transcription = client.get(f"/api/projects/{pid}/transcription").json()
     assert (transcription["beats_per_measure"], transcription["key"]) == (4, None)
     assert transcription["transpose"] == 0
+
+
+def fake_song(monkeypatch, capo_seen: list):
+    import ml.inference.song as song
+    from music_core.tab import open_strings
+
+    def transcribe(path, separator, chords, beats, tuning_name="standard", capo=None, **kw):
+        capo_seen.append(capo)
+        capo = 3 if capo is None else capo
+        melody = [Note(67, 0.5, 1.0, string=3, fret=9 - capo)]
+        return song.SongResult(
+            notes=melody,
+            duration=4.0,
+            tempo=120.0,
+            tuning=list(open_strings(tuning_name, capo)),
+            chords=[
+                {"start": 0.0, "end": 2.0, "label": "C:min"},
+                {"start": 2.0, "end": 4.0, "label": "A#:maj"},
+            ],
+            beats=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
+            downbeats=[0.0, 2.0],
+            capo=capo,
+            beats_per_measure=4,
+            downbeat=0.0,
+            key="F major",
+        )
+
+    monkeypatch.setattr(song, "transcribe_song", transcribe)
+    monkeypatch.setattr(transcription, "_load_song_models", lambda: (None, None, None))
+
+
+def test_songs_get_chords_bars_and_an_automatic_capo(client, monkeypatch):
+    from ml.inference.song import SONG_VERSION
+    from ml.inference.voice import VOICE_VERSION
+
+    capo_seen: list = []
+    fake_song(monkeypatch, capo_seen)
+    r = client.post(
+        "/api/projects",
+        files={"file": ("song.wav", wav_bytes(), "audio/wav")},
+        data={"source": "song", "capo": "-1"},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    project = client.get(f"/api/projects/{pid}").json()
+    assert (project["source"], project["capo"], project["capo_auto"]) == ("song", 3, True)
+    assert project["model_version"] == f"{SONG_VERSION}+{VOICE_VERSION}" and capo_seen == [None]
+    assert client.get("/api/models").json()["song_version"] == project["model_version"]
+    t = client.get(f"/api/projects/{pid}/transcription").json()
+    assert [c["label"] for c in t["chords"]] == ["C:min", "A#:maj"]
+    assert t["downbeats"] == [0.0, 2.0] and len(t["beats"]) == 8
+    assert (t["key"], t["capo"], t["tuning"]) == ("F major", 3, [43, 48, 53, 58, 62, 67])
+
+    sheet = client.get(f"/api/projects/{pid}/chordsheet").text
+    assert "Ton: F major · Capo 3" in sheet and "| Am " in sheet and "(= Cm)" in sheet
+    xml = client.get(f"/api/projects/{pid}/musicxml").text
+    assert '<kind text="m">minor</kind>' in xml and "<root-step>B</root-step>" in xml
+
+    # Chords are edited and saved with the notes; nonsense is refused.
+    edited = [{"start": 0.0, "end": 4.0, "label": "F:maj7"}]
+    r = client.put(f"/api/projects/{pid}/notes", json={"notes": t["notes"], "chords": edited})
+    assert r.status_code == 200 and r.json()["chords"] == edited
+    bad = {"notes": t["notes"], "chords": [{"start": 0, "end": 1, "label": "H:maj"}]}
+    assert client.put(f"/api/projects/{pid}/notes", json=bad).status_code == 422
+
+    # A chosen capo is kept; an automatic one only makes sense for songs.
+    client.post(f"/api/projects/{pid}/retranscribe?capo=0")
+    assert capo_seen[-1] == 0 and client.get(f"/api/projects/{pid}").json()["capo_auto"] is False
+    guitar = upload(client, wav_bytes()).json()["id"]
+    assert client.post(f"/api/projects/{guitar}/retranscribe?capo=-1").status_code == 422
+    assert client.get(f"/api/projects/{guitar}/chordsheet").status_code == 404
+
+
+def test_chord_voicings_name_and_finger_shapes_from_a_capo(client):
+    r = client.post(
+        "/api/chords/voicings",
+        json={"labels": ["C:min", "A#", "N"], "capo": 3, "key": "F major"},
+    )
+    assert r.status_code == 200
+    cm, bb, none = r.json()
+    assert (cm["name"], cm["shape"], cm["frets"]) == ("Cm", "Am", [-1, 0, 2, 2, 1, 0])
+    assert (bb["name"], bb["shape"]) == ("Bb", "G")
+    assert none["frets"] is None
+    bad = client.post("/api/chords/voicings", json={"labels": ["Q"]})
+    assert bad.status_code == 422
+
+
+def drifting_beats(count: int = 24, start: float = 0.3) -> list[float]:
+    """A player without a click: beats 0.5 s apart, slowing down to 0.6 s."""
+    beats, t = [], start
+    for i in range(count):
+        beats.append(round(t, 4))
+        t += 0.5 + 0.1 * i / count
+    return beats
+
+
+def test_guitar_projects_follow_the_tracked_beats(client, monkeypatch):
+    beats = drifting_beats()
+    recording = {
+        "beats": beats,
+        "downbeats": beats[1::3],  # 3/4, the bar starting on the second beat
+        "chord_scores": [{"start": 0.0, "top": [["E:min", -0.1], ["G:maj", -2.0]]}],
+    }
+    monkeypatch.setattr(transcription, "_recording_analysis", lambda path: recording)
+    pid = upload(client, wav_bytes()).json()["id"]
+    t = client.get(f"/api/projects/{pid}/transcription").json()
+    assert t["beats"] == beats and t["beat_grid"] is True
+    assert t["beats_per_measure"] == 3 and t["downbeat"] is None
+    assert t["tempo"] == pytest.approx(60 / np.median(np.diff(beats)), abs=0.01)
+
+    request = {"notes": t["notes"], "tempo": t["tempo"], "beats_per_measure": 3, "project_id": pid}
+    analysis = client.post("/api/analysis", json=request).json()
+    assert analysis["tracked"] is True
+    assert all(any(abs(b - x) < 1e-3 for x in analysis["beats"]) for b in beats)
+    assert [b["time"] for b in analysis["bars"]][:3] == pytest.approx(beats[1:8:3], abs=1e-3)
+    # The note at 0.1 s is in bar 1, which starts before the recording: the first bar
+    # line in it is bar 2's, as the MusicXML export numbers them.
+    assert analysis["bars"][0]["number"] == 2
+    fixed = client.post(
+        "/api/analysis", json={**request, "beat_grid": False, "duration": 10}
+    ).json()
+    assert fixed["tracked"] is False and len(set(np.round(np.diff(fixed["beats"]), 3))) == 1
+    assert client.post("/api/analysis", json={**request, "project_id": "nope"}).status_code == 404
+
+    # The exports follow the drift: tempo changes in MusicXML, a tempo map in MIDI.
+    played = [{"pitch": 64, "start": b, "end": b + 0.3, "string": 5, "fret": 0} for b in beats]
+    client.put(f"/api/projects/{pid}/notes", json={"notes": played})
+    xml = client.get(f"/api/projects/{pid}/musicxml").text
+    assert xml.count("<sound tempo=") > 1
+    import mido
+
+    midi = mido.MidiFile(file=io.BytesIO(client.get(f"/api/projects/{pid}/midi").content))
+    assert sum(m.type == "set_tempo" for m in midi.tracks[0]) > 5
+
+    # Switching the grid off is saved like the rest of the notation.
+    r = client.put(f"/api/projects/{pid}/notes", json={"notes": played, "beat_grid": False})
+    assert r.json()["beat_grid"] is False
+    midi = mido.MidiFile(file=io.BytesIO(client.get(f"/api/projects/{pid}/midi").content))
+    assert sum(m.type == "set_tempo" for m in midi.tracks[0]) == 1
+
+
+def test_songs_get_key_changes_slash_chords_and_a_strumming_pattern(client, monkeypatch):
+    import ml.inference.song as song
+
+    capo_seen: list = []
+    fake_song(monkeypatch, capo_seen)
+    plain = song.transcribe_song
+
+    def modulating(*args, **kwargs):
+        result = plain(*args, **kwargs)
+        result.chords = [
+            {"start": 0.0, "end": 2.0, "label": "D:maj/3"},
+            {"start": 2.0, "end": 4.0, "label": "A#:maj"},
+        ]
+        result.keys = [
+            {"start": 0.0, "end": 2.0, "key": "D major"},
+            {"start": 2.0, "end": 4.0, "key": "F major"},
+        ]
+        result.strums = [(0.0, 3.0), (0.5, 3.0), (0.75, 3.0), (1.0, 3.0), (1.5, 3.0)] * 1 + [
+            (2.0, 3.0), (2.5, 3.0), (2.75, 3.0), (3.0, 3.0), (3.5, 3.0)
+        ]  # fmt: skip
+        result.key = "F major"
+        return result
+
+    monkeypatch.setattr(song, "transcribe_song", modulating)
+    r = client.post(
+        "/api/projects",
+        files={"file": ("song.wav", wav_bytes(), "audio/wav")},
+        data={"source": "song", "capo": "0"},
+    )
+    pid = r.json()["id"]
+    t = client.get(f"/api/projects/{pid}/transcription").json()
+    assert t["key"] is None and [k["key"] for k in t["keys"]] == ["D major", "F major"]
+    assert t["chords"][0]["label"] == "D:maj/3"
+
+    request = {"notes": t["notes"], "tempo": 120, "project_id": pid}
+    analysis = client.post("/api/analysis", json=request).json()
+    assert [k["key"] for k in analysis["keys"]] == ["D major", "F major"]
+    assert analysis["rhythm"]["text"] == "D-DUD-D-"  # eighths: 1, 2 &, 3 (and 4)
+    assert analysis["rhythm"]["per_beat"] == 2
+
+    sheet = client.get(f"/api/projects/{pid}/chordsheet").text
+    assert "D/F#" in sheet and "200232" in sheet  # the bass on the low string
+    assert "Ton değişimi: ölçü 2: F major" in sheet and "Ritim: D-DUD-D-" in sheet
+    xml = client.get(f"/api/projects/{pid}/musicxml").text
+    assert "<bass-step>F</bass-step>" in xml and xml.count("<fifths>") == 2

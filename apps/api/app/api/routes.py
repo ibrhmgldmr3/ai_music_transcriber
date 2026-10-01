@@ -17,9 +17,10 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.analysis import project_context, song_chords
 from app.config import settings
 from app.models import Project, ProjectStatus, get_db
-from app.schemas import NotesUpdate, ProjectOut, TranscriptionOut
+from app.schemas import NotesUpdate, PitchCurveOut, ProjectOut, TranscriptionOut
 from app.schemas.project import SourceName, TuningName
 from app.services.storage import (
     InvalidUpload,
@@ -31,7 +32,8 @@ from app.services.storage import (
     stored_file,
 )
 from app.services.transcription import job_is_stale, run_transcription
-from music_core.analysis import Key, estimate_key
+from music_core.analysis import Analysis, Key, analyze
+from music_core.guitar_chords import ChordSymbol, chord_sheet
 from music_core.midi import notes_to_midi_bytes
 from music_core.musicxml import notes_to_musicxml
 from music_core.notes import Note
@@ -78,8 +80,29 @@ def _attachment(filename: str) -> dict[str, str]:
     return {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
 
 
+def _song_chords(project: Project) -> list[tuple[float, float, ChordSymbol]]:
+    chords = []
+    for c in project.chords or []:
+        symbol = ChordSymbol.parse(c["label"])
+        if symbol is not None:
+            chords.append((c["start"], c["end"], symbol))
+    return chords
+
+
+def _capo_setting(capo: int, source: str) -> tuple[int, bool]:
+    """(capo, capo_auto) from a request; -1 asks a song project to choose the capo."""
+    if capo >= 0:
+        return capo, False
+    if source != "song":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "An automatic capo (-1) is for songs only"
+        )
+    return 0, True
+
+
 def _transcription_out(project: Project) -> TranscriptionOut:
     notes = project.notes or []
+    beats = project.beats or {}
     confidences = [n["confidence"] for n in notes if n.get("confidence") is not None]
     return TranscriptionOut(
         project_id=project.id,
@@ -88,6 +111,12 @@ def _transcription_out(project: Project) -> TranscriptionOut:
         tuning_name=project.tuning_name,
         capo=project.capo,
         transpose=project.transpose or 0,
+        capo_auto=bool(project.capo_auto),
+        chords=project.chords,
+        keys=project.keys,
+        beats=beats.get("beats", []),
+        downbeats=beats.get("downbeats", []),
+        beat_grid=bool(project.beat_grid),
         mean_confidence=sum(confidences) / len(confidences) if confidences else None,
         notes=notes,
         beats_per_measure=project.beats_per_measure or 4,
@@ -108,16 +137,20 @@ def create_project(
     source: SourceName = Form("guitar"),
     separate_guitar: bool = Form(False),
     tuning: TuningName = Form("standard"),
-    capo: int = Form(0, ge=0, le=MAX_CAPO),
+    capo: int = Form(0, ge=-1, le=MAX_CAPO),
     db: Session = Depends(get_db),
 ) -> Project:
     """Upload a recording and start transcribing it.
+
+    ``source`` "song" transcribes a whole song's chords and sung melody for guitar
+    (always separating the vocals); its ``capo`` -1 lets it choose the easiest capo.
 
     ``source`` is "guitar", or "voice" for a sung, hummed or whistled melody to set
     for guitar. ``separate_guitar`` (song mode) isolates the guitar (voice: the vocals)
     from a band mix first; ``tuning`` and ``capo`` say how the guitar is tuned, for
     its strings and frets.
     """
+    capo, capo_auto = _capo_setting(capo, source)
     try:
         audio_path = save_upload(file)
     except InvalidUpload as exc:
@@ -132,6 +165,7 @@ def create_project(
         separate_guitar=separate_guitar,
         tuning_name=tuning,
         capo=capo,
+        capo_auto=capo_auto,
     )
     try:
         db.add(project)
@@ -177,7 +211,9 @@ def retranscribe(
     source: SourceName | None = Query(None, description="guitar or voice recording"),
     separate_guitar: bool | None = Query(None, description="switch song mode on/off"),
     tuning: TuningName | None = Query(None, description="the guitar's tuning"),
-    capo: int | None = Query(None, ge=0, le=MAX_CAPO, description="capo fret, 0 for none"),
+    capo: int | None = Query(
+        None, ge=-1, le=MAX_CAPO, description="capo fret, 0 for none, -1 automatic (songs)"
+    ),
     db: Session = Depends(get_db),
 ) -> Project:
     project = _get_project(db, project_id)
@@ -186,12 +222,14 @@ def retranscribe(
         raise HTTPException(status.HTTP_409_CONFLICT, "Transcription already in progress")
     if source is not None:
         project.source = source
+        if source != "song":
+            project.capo_auto = False
     if separate_guitar is not None:
         project.separate_guitar = separate_guitar
     if tuning is not None:
         project.tuning_name = tuning
     if capo is not None:
-        project.capo = capo
+        project.capo, project.capo_auto = _capo_setting(capo, project.source)
     project.status = ProjectStatus.pending
     project.error = None
     db.commit()
@@ -213,6 +251,16 @@ def get_transcription(project_id: str, db: Session = Depends(get_db)) -> Transcr
     project = _get_project(db, project_id)
     _require_transcription(project)
     return _transcription_out(project)
+
+
+@router.get("/{project_id}/pitch", response_model=PitchCurveOut)
+def get_pitch_curve(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """The sung pitch of a voice project, for drawing behind its notes."""
+    project = _get_project(db, project_id)
+    _require_transcription(project)
+    if not project.pitch_curve:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Only voice projects have a pitch curve")
+    return project.pitch_curve
 
 
 @router.put("/{project_id}/notes", response_model=TranscriptionOut)
@@ -244,19 +292,42 @@ def update_notes(
         project.key_name = payload.key
     if "downbeat" in payload.model_fields_set:
         project.downbeat = payload.downbeat
+    if payload.chords is not None:
+        project.chords = [c.model_dump() for c in sorted(payload.chords, key=lambda c: c.start)]
+    if payload.beat_grid is not None:
+        project.beat_grid = payload.beat_grid
     db.commit()
     return _transcription_out(project)
 
 
+def _project_analysis(project: Project, notes: list[Note]) -> Analysis:
+    """The analysis the editor shows for the stored notes and notation."""
+    context = project_context(project)
+    end = context.pop("end", None)
+    return analyze(
+        notes,
+        project.tempo,
+        project.beats_per_measure or 4,
+        key=_chosen_key(project),
+        downbeat=project.downbeat,
+        end=end,
+        **context,
+    )
+
+
 @router.get("/{project_id}/midi")
 def export_midi(project_id: str, db: Session = Depends(get_db)) -> Response:
+    """The notes at their recorded times; with tracked beats, a tempo map puts the
+    file's beats and bars where the music's are."""
     project = _get_project(db, project_id)
     notes = _require_transcription(project)
+    analysis = _project_analysis(project, notes)
     data = notes_to_midi_bytes(
         notes,
         tempo=project.tempo or 120.0,
-        key=_chosen_key(project) or estimate_key(notes),
+        key=analysis.key,
         beats_per_measure=project.beats_per_measure or 4,
+        grid=analysis.grid if analysis.tracked else None,
     )
     return Response(data, media_type="audio/midi", headers=_attachment(f"{project.name}.mid"))
 
@@ -266,6 +337,7 @@ def export_musicxml(project_id: str, db: Session = Depends(get_db)) -> Response:
     """Notation + tablature for MuseScore, Guitar Pro and other score editors."""
     project = _get_project(db, project_id)
     notes = _require_transcription(project)
+    context = project_context(project)
     data = notes_to_musicxml(
         notes,
         tempo=project.tempo or 120.0,
@@ -275,6 +347,11 @@ def export_musicxml(project_id: str, db: Session = Depends(get_db)) -> Response:
         key=_chosen_key(project),
         downbeat=project.downbeat,
         capo=project.capo,
+        chords=song_chords(project),
+        beats=context.get("beats"),
+        downbeats=context.get("downbeats"),
+        keys=context.get("keys"),
+        chord_scores=context.get("chord_scores"),
     )
     return Response(
         data,
@@ -289,3 +366,26 @@ def export_tab(project_id: str, db: Session = Depends(get_db)) -> PlainTextRespo
     notes = _require_transcription(project)
     text = tab_to_ascii(notes, project.tuning or STANDARD_TUNING, capo=project.capo)
     return PlainTextResponse(text, headers=_attachment(f"{project.name}.txt"))
+
+
+@router.get("/{project_id}/chordsheet", response_class=PlainTextResponse)
+def export_chord_sheet(project_id: str, db: Session = Depends(get_db)) -> PlainTextResponse:
+    """A song project's chords as a plain-text sheet: the shapes to play, bar by bar."""
+    project = _get_project(db, project_id)
+    _require_transcription(project)
+    if project.chords is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Only song projects have a chord sheet")
+    analysis = _project_analysis(project, [Note.from_dict(n) for n in project.notes or []])
+    text = chord_sheet(
+        _song_chords(project),
+        (project.beats or {}).get("downbeats", []),
+        title=project.name,
+        key=_chosen_key(project) or analysis.key,
+        capo=project.capo,
+        tempo=project.tempo,
+        beats_per_measure=project.beats_per_measure or 4,
+        tuning=open_strings(project.tuning_name),
+        keys=None if project.key_name else analysis.keys,
+        rhythm=analysis.rhythm.text() if analysis.rhythm and any(analysis.rhythm.pattern) else None,
+    )
+    return PlainTextResponse(text, headers=_attachment(f"{project.name} (akorlar).txt"))

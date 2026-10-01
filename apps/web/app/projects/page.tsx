@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ModelInfo, Project } from "@music-transcriber/shared-types";
 import {
   STATUS_LABELS,
+  currentVersion,
   deleteProject,
   errorMessage,
   getModelInfo,
@@ -66,7 +67,9 @@ export default function ProjectsPage() {
     if (!models || redoable.length === 0) return;
     const skipped = outdated.length - redoable.length;
     const message =
-      `${redoable.length} proje ${modelLabel(models.version)} ile yeniden çözümlensin mi?` +
+      `${redoable.length} proje güncel modelle (${[
+        ...new Set(redoable.map((p) => modelLabel(currentVersion(p.source, models)))),
+      ].join(", ")}) yeniden çözümlensin mi?` +
       (skipped ? `\nDüzenlenmiş ${skipped} proje atlanacak; onları editörden tek tek yenileyebilirsiniz.` : "");
     if (!confirm(message)) return;
     setUpdating(true);
@@ -144,6 +147,11 @@ export default function ProjectsPage() {
                           }
                         >
                           Eski model
+                        </span>
+                      )}
+                      {p.source === "song" && (
+                        <span className="badge" title="Şarkının akorları ve melodisi">
+                          Şarkı
                         </span>
                       )}
                       {p.source === "voice" && (

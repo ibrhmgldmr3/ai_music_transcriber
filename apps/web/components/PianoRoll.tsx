@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactElement } from "react";
-import type { MusicKey, Note } from "@music-transcriber/shared-types";
+import type { MusicKey, Note, PitchCurve } from "@music-transcriber/shared-types";
 import type { Drag } from "@/lib/editing";
 import { notesInRange } from "@/lib/editing";
 import { isBlackKey, midiToName, type BeatGrid } from "@/lib/music";
+import { curvePath } from "@/lib/pitchCurve";
 import { startPointerDrag } from "@/lib/pointerDrag";
 import { useFollowPlayhead, type LoopRange } from "@/lib/usePlayback";
 
@@ -30,6 +31,8 @@ interface PianoRollProps {
   loop?: LoopRange | null;
   /** Spells note names (Bb rather than A# in F major). */
   musicKey?: MusicKey | null;
+  /** Voice projects: the sung pitch, drawn behind the notes. */
+  pitchCurve?: PitchCurve | null;
 }
 
 /** Guitar range by default, widened to fit every note. */
@@ -70,6 +73,7 @@ export default function PianoRoll({
   grid = null,
   loop = null,
   musicKey = null,
+  pitchCurve = null,
 }: PianoRollProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const suppressClick = useRef(false);
@@ -122,6 +126,11 @@ export default function PianoRoll({
     }
     return items;
   }, [minPitch, maxPitch, rowHeight, width, height, duration, pixelsPerSecond, grid]);
+
+  const curve = useMemo(
+    () => (pitchCurve ? curvePath(pitchCurve, pixelsPerSecond, rowHeight, maxPitch) : null),
+    [pitchCurve, pixelsPerSecond, rowHeight, maxPitch],
+  );
 
   const pressNote = (e: PointerEvent, index: number, kind: Drag["kind"]) => {
     if (e.button !== 0) return;
@@ -231,7 +240,14 @@ export default function PianoRoll({
 
   return (
     <section className="stack tight">
-      <h3 className="section-title">Piyano rulosu</h3>
+      <div className="row between">
+        <h3 className="section-title">Piyano rulosu</h3>
+        {pitchCurve && (
+          <span className="muted small">
+            <span className="pr-curve-key" /> söylediğiniz perde
+          </span>
+        )}
+      </div>
       <div className="timeline">
         <svg className="timeline-labels" width={KEY_WIDTH} height={height}>
           {keys}
@@ -249,6 +265,7 @@ export default function PianoRoll({
             )}
             {gridLines}
             {noteRects}
+            {curve && <path d={curve} className="pr-curve" />}
             {marquee && (
               <rect
                 x={Math.min(marquee.x0, marquee.x1)}
