@@ -1,0 +1,19 @@
+# Note model with room microphones and lossy codecs: the guitar_mixed_low.yaml recipe
+# plus GuitarSet rendered through simulated rooms (image-source method, the microphone
+# 0.5-4 m away) and low-bitrate Opus / AAC / MP3, the conditions of a phone or a camera
+# across the room. guitar_room_egdb.yaml adds EGDB with aligned note timing.
+#
+#   python scripts/prepare_dataset.py --augment --variants room roomfar codec roomcodec \
+#       --set paths.splits_dir=ml/data/splits/guitarset_room
+#   python scripts/mix_splits.py --out ml/data/splits/mixed_room \
+#       guitarset=ml/data/splits/guitarset_fx guitarset=ml/data/splits/guitarset_room \
+#       guitar_techs=ml/data/splits/guitar_techs
+#
+# guitar_v10a = guitar_v9 fine-tuned on this mix:
+#   python scripts/train.py --config ml/configs/guitar_room.yaml \
+#       --init ml/checkpoints/guitar_v9/best.pt --set training.lr=2e-4 training.epochs=20
+extends: guitar_mixed_low.yaml
+
+paths:
+  splits_dir: ml/data/splits/mixed_room
+  checkpoint_dir: ml/checkpoints/guitar_room

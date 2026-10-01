@@ -1,7 +1,8 @@
 """Robustness benchmark: how transcription holds up on degraded or effected recordings.
 
 Each recording of a split is degraded (phone, noise, big room, overdrive, distortion,
-echo) and run through the full pipeline. None of the conditions changes pitch or
+echo, a simulated room microphone and a voice memo) and run through the full pipeline.
+None of the conditions changes pitch or
 timing, so the annotations stay valid. Every (recording, condition) pair uses a fixed
 random seed, so different models are compared on identical audio.
 
@@ -35,6 +36,11 @@ CONDITIONS: dict[str, dict[str, Any]] = {
     "overdrive": {"distortion": "soft"},
     "distortion": {"distortion": "hard"},
     "echo": {"echo": True},
+    # Simulated rooms and codecs (augmentation.room_mic / codec): what the guitar_room
+    # models trained on, in other random rooms; Guitar-TECHS' real room microphones are
+    # the unseen test of the same thing (scripts/benchmark_datasets.py).
+    "room mic": {"room": {"distance_range": [2.0, 4.0], "rt60_range": [0.4, 1.0]}},
+    "voice memo": {"room": True, "codec": True},
 }
 
 

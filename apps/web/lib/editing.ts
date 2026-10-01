@@ -1,5 +1,5 @@
 import type { Note } from "@music-transcriber/shared-types";
-import { MAX_FRET, clamp, defaultPosition } from "./music";
+import { MAX_FRET, beatPosition, beatTime, clamp, defaultPosition } from "./music";
 
 /** Shortest note a resize can leave (seconds). */
 export const MIN_DURATION = 0.02;
@@ -89,4 +89,80 @@ export function notesInRange(notes: Note[], t0: number, t1: number, p0: number, 
   const [a, b] = t0 <= t1 ? [t0, t1] : [t1, t0];
   const [lo, hi] = p0 <= p1 ? [p0, p1] : [p1, p0];
   return notes.flatMap((n, i) => (n.start >= a && n.start <= b && n.pitch >= lo && n.pitch <= hi ? [i] : []));
+}
+
+/** The selected notes, or all of them when nothing is selected. */
+function targets(notes: Note[], selection: readonly number[]): Set<number> {
+  const chosen = selection.filter((i) => i >= 0 && i < notes.length);
+  return new Set(chosen.length ? chosen : notes.map((_, i) => i));
+}
+
+/**
+ * Starts and ends moved to the nearest line of a rhythm grid: `division` lines per beat
+ * of `beats` (the analysis' beat times); a note keeps at least one step.
+ */
+export function quantizeNotes(
+  notes: Note[],
+  selection: readonly number[],
+  beats: number[],
+  division: number,
+): Note[] {
+  if (beats.length < 2 || !(division > 0)) return notes;
+  const chosen = targets(notes, selection);
+  // Grid steps are 1/division of whichever beat a time falls in, so the grid can follow
+  // a tempo that drifts (tracked beats) as well as a steady one.
+  const step = (t: number) => Math.round(beatPosition(beats, t) * division);
+  const at = (k: number) => Math.max(0, beatTime(beats, k / division));
+  const round = (t: number) => Math.round(t * 1e4) / 1e4;
+  return notes.map((note, i) => {
+    if (!chosen.has(i)) return note;
+    const first = step(note.start);
+    const start = round(at(first));
+    const end = round(at(Math.max(step(note.end), first + 1)));
+    return start === note.start && end === note.end ? note : edited(note, { start, end });
+  });
+}
+
+const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+const MINOR = [0, 2, 3, 5, 7, 8, 10, 11]; // natural minor plus the leading tone (harmonic minor)
+
+/** Pitch classes of a key's scale. */
+export function scalePitchClasses(key: { tonic: number; mode: "major" | "minor" }): Set<number> {
+  return new Set((key.mode === "major" ? MAJOR : MINOR).map((step) => (key.tonic + step) % 12));
+}
+
+/**
+ * Notes outside the key's scale moved a semitone to the scale note on the side they
+ * were sung (`sung`: the pitch actually sung, e.g. from the pitch curve), else towards
+ * the previous note. Returns the notes and how many moved.
+ */
+export function snapToScale(
+  notes: Note[],
+  selection: readonly number[],
+  key: { tonic: number; mode: "major" | "minor" },
+  tuning: number[],
+  sung?: (note: Note) => number | null,
+): { notes: Note[]; moved: number } {
+  const scale = scalePitchClasses(key);
+  const inScale = (pitch: number) => scale.has(((pitch % 12) + 12) % 12);
+  const chosen = targets(notes, selection);
+  const byTime = notes.map((_, i) => i).sort((a, b) => notes[a].start - notes[b].start);
+  let moved = 0;
+  const result = [...notes];
+  byTime.forEach((i, order) => {
+    const note = notes[i];
+    if (!chosen.has(i) || inScale(note.pitch)) return;
+    const up = inScale(note.pitch + 1);
+    const down = inScale(note.pitch - 1);
+    let direction = up && !down ? 1 : -1;
+    if (up && down) {
+      const heard = sung?.(note) ?? null;
+      const previous = order > 0 ? result[byTime[order - 1]].pitch : null;
+      if (heard !== null && heard !== note.pitch) direction = heard > note.pitch ? 1 : -1;
+      else if (previous !== null && previous !== note.pitch) direction = previous > note.pitch ? 1 : -1;
+    }
+    result[i] = withPitch(note, note.pitch + direction, tuning);
+    moved++;
+  });
+  return { notes: moved ? result : notes, moved };
 }

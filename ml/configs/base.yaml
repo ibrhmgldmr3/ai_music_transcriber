@@ -69,6 +69,12 @@ offline_augmentation:
     - {name: phone, phone: true}
     - {name: bigroom, reverb: {decay_range: [0.6, 1.6], wet_range: [0.2, 0.5]}}
     - {name: noisy, noise_snr_db: [8, 20]}
+    # Room microphones (simulated rooms, early reflections and distance) and lossy
+    # voice-memo / messaging codecs; render only these with --variants room roomfar ...
+    - {name: room, room: true}
+    - {name: roomfar, room: {distance_range: [2.0, 4.0], rt60_range: [0.4, 1.0]}}
+    - {name: codec, codec: true}
+    - {name: roomcodec, room: true, codec: true}
 
 training:
   epochs: 100

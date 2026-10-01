@@ -27,7 +27,7 @@ jobs:
       - name: Python packages
         run: |
           # CPU-only PyTorch: the CUDA wheels are gigabytes and unused here.
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[ml,dev]" -r apps/api/requirements.txt
       - run: ruff check .
       - run: ruff format --check .

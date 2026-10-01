@@ -38,9 +38,13 @@ def get_predictor():
     )
 
 
+# The guitar method around the models: beats and chords tracked in the recording.
+GUITAR_METHOD = "beats-btc@1"
+
+
 @lru_cache(maxsize=1)
 def model_version() -> str:
-    """The installed models, e.g. ``guitar_v8@1a2b3c4d+guitar_v7@5e6f7a8b``.
+    """The installed models and method, e.g. ``guitar_v8@1a2b3c4d+guitar_v7@5e6f7a8b+beats-btc@1``.
 
     Checkpoint folder plus a fingerprint of the file (size and modification time), so a
     retrained or replaced model gets a new version. Cached like the predictor: both
@@ -49,7 +53,78 @@ def model_version() -> str:
     paths = [settings.model_checkpoint]
     if settings.model_tab_checkpoint:
         paths.append(settings.model_tab_checkpoint)
-    return "+".join(_fingerprint(path) for path in paths)
+    return "+".join([*(_fingerprint(path) for path in paths), GUITAR_METHOD])
+
+
+@lru_cache(maxsize=1)
+def get_chord_recognizer():
+    from ml.inference.chords import ChordRecognizer
+
+    return ChordRecognizer(device=settings.model_device)
+
+
+@lru_cache(maxsize=1)
+def get_beat_tracker():
+    from ml.inference.chords import BeatTracker
+
+    return BeatTracker(device=settings.model_device)
+
+
+def _load_song_models():
+    try:
+        return _load_separator(), get_chord_recognizer(), get_beat_tracker()
+    except ImportError as exc:
+        logger.error("Song chords unavailable: %s", exc)
+        raise TranscriptionError(
+            "Song chords need the 'beat-this' and 'demucs' packages on the server."
+        ) from exc
+    except OSError as exc:  # no connection for the first download of a model
+        logger.error("Song models could not be downloaded: %s", exc)
+        raise TranscriptionError(
+            "The chord and beat models could not be downloaded; check the connection."
+        ) from exc
+
+
+def _optional_guitar_model():
+    """The note model for a song's strums, if one is installed."""
+    try:
+        return get_predictor()
+    except FileNotFoundError:
+        return None
+
+
+def _recording_analysis(audio_path: str) -> dict[str, Any] | None:
+    """Beats, bar lines and per-beat chord scores of a guitar recording, or None when
+    the models can't run (missing package, no connection for their first download):
+    the transcription then keeps its notes and one tempo."""
+    from ml.inference.chords import beat_scores
+    from ml.preprocessing.audio import load_audio
+
+    try:
+        tracker, recognizer = get_beat_tracker(), get_chord_recognizer()
+    except (ImportError, OSError) as exc:
+        logger.warning("Beat tracking unavailable, using one tempo: %s", exc)
+        return None
+    sample_rate = 44100
+    y = load_audio(audio_path, sample_rate, mono=True, normalize=True)
+    beats, downbeats = tracker(y, sample_rate)
+    if len(beats) < 2:
+        return None
+    duration = len(y) / sample_rate
+    probs = recognizer.probabilities(y, sample_rate)
+    return {
+        "beats": [round(float(b), 3) for b in beats],
+        "downbeats": [round(float(b), 3) for b in downbeats],
+        "chord_scores": beat_scores(probs, recognizer.frame_rate, beats, duration),
+    }
+
+
+def song_version() -> str:
+    """The song method's version (``ml.inference.song``), with the voice method's that
+    transcribes its melody."""
+    from ml.inference.song import SONG_VERSION
+
+    return f"{SONG_VERSION}+{voice_version()}"
 
 
 def voice_version() -> str:
@@ -133,7 +208,10 @@ def run_transcription(project_id: str) -> None:
         project = db.get(Project, project_id)
         audio_path = project.audio_path if project is not None else None
         separate = bool(project.separate_guitar) if project is not None else False
-        voice = project is not None and project.source == "voice"
+        source = project.source if project is not None else "guitar"
+        voice = source == "voice"
+        tuning_name = project.tuning_name if project is not None else "standard"
+        capo = None if project is None or project.capo_auto else project.capo
         tuning = open_strings(project.tuning_name, project.capo) if project is not None else None
     started = _update(
         project_id, status=ProjectStatus.processing, error=None, progress=0.0, stage="loading"
@@ -145,8 +223,38 @@ def run_transcription(project_id: str) -> None:
     try:
         _check_audio(audio_path)
         with _model_lock:
-            separator = _load_separator() if separate else None
-            if voice:
+            separator = _load_separator() if separate and source != "song" else None
+            song: dict[str, Any] = {}
+            if source == "song":
+                from ml.inference.song import transcribe_song
+
+                separator, chords, beats = _load_song_models()
+                result = transcribe_song(
+                    audio_path,
+                    separator,
+                    chords,
+                    beats,
+                    tuning_name=tuning_name,
+                    capo=capo,
+                    progress=_progress_reporter(project_id),
+                    guitar_model=_optional_guitar_model(),
+                )
+                version = song_version()
+                song = {
+                    "chords": result.chords,
+                    "beats": {
+                        "beats": result.beats,
+                        "downbeats": result.downbeats,
+                        "strums": result.strums,
+                    },
+                    "capo": result.capo,
+                    "beats_per_measure": result.beats_per_measure,
+                    "downbeat": result.downbeat,
+                    # A modulating song names its keys section by section, else one key.
+                    "key_name": None if result.keys else result.key,
+                    "keys": result.keys or None,
+                }
+            elif voice:
                 from ml.inference.voice import transcribe_voice
 
                 result = transcribe_voice(
@@ -157,11 +265,8 @@ def run_transcription(project_id: str) -> None:
                 )
                 version = voice_version()
             else:
-                result = _load_predictor().transcribe(
-                    audio_path,
-                    separator=separator,
-                    tuning=tuning,
-                    progress=_progress_reporter(project_id),
+                result, song = _transcribe_guitar(
+                    audio_path, separator, tuning, _progress_reporter(project_id)
                 )
                 version = model_version()
     except TranscriptionError as exc:
@@ -182,6 +287,9 @@ def run_transcription(project_id: str) -> None:
         tempo=result.tempo,
         tuning=result.tuning,
         transpose=result.transpose,
+        pitch_curve=result.pitch_curve,
+        # Only songs have chords and keys of their own; voice projects have no beats.
+        **{"chords": None, "keys": None, "beats": None, **song},
         model_version=version,
         edited=False,
         progress=None,
@@ -192,6 +300,23 @@ def run_transcription(project_id: str) -> None:
         logger.info("Transcribed %s: %d notes", project_id, len(result.notes))
     else:
         logger.info("Project %s was deleted during transcription", project_id)
+
+
+def _transcribe_guitar(audio_path: str, separator, tuning, progress):
+    """The guitar model's notes, and the beats and chord scores of the recording (the
+    whole mix, as the beat tracker and chord recognizer were trained on mixes)."""
+    from music_core.timing import median_tempo, tracked_meter
+
+    result = _load_predictor().transcribe(
+        audio_path, separator=separator, tuning=tuning, progress=progress
+    )
+    progress(0.95, "finishing")
+    recording = _recording_analysis(audio_path)
+    if recording is None:
+        return result, {}
+    meter = tracked_meter(recording["beats"], recording["downbeats"])
+    result.tempo = round(median_tempo(recording["beats"]), 2)
+    return result, {"beats": recording, "beats_per_measure": meter, "downbeat": None}
 
 
 def _progress_reporter(project_id: str, interval: float = 0.5):

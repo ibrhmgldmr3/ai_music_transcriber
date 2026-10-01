@@ -10,7 +10,8 @@ WORKDIR /repo
 # CPU-only PyTorch keeps the image small (inference runs ~30x real time on a CPU);
 # docker-compose.gpu.yml passes a CUDA index instead.
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX_URL}
+# torchaudio (Demucs, Beat This!) comes from the same index, so pip keeps this torch.
+RUN pip install --no-cache-dir torch torchaudio --index-url ${TORCH_INDEX_URL}
 
 COPY pyproject.toml README.md ./
 COPY packages/music-core packages/music-core

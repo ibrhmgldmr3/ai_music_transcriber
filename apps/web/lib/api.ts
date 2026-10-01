@@ -4,11 +4,14 @@ import type {
   ModelInfo,
   Note,
   NotesUpdate,
+  PitchCurve,
   Project,
   ProjectStatus,
   RenderRequest,
   Source,
   Transcription,
+  Voicing,
+  VoicingRequest,
 } from "@music-transcriber/shared-types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -16,6 +19,7 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:800
 export const SOURCE_LABELS: Record<Source, string> = {
   guitar: "Gitar",
   voice: "Ses (şarkı, mırıldanma, ıslık)",
+  song: "Şarkı (melodi + akor)",
 };
 
 export const STATUS_LABELS: Record<ProjectStatus, string> = {
@@ -29,13 +33,15 @@ export const STAGE_LABELS: Record<NonNullable<Project["stage"]>, string> = {
   loading: "Ses yükleniyor",
   separating: "Gitar diğer enstrümanlardan ayrılıyor",
   transcribing: "Notalar çözümleniyor",
-  finishing: "Tel/perde ve tempo hesaplanıyor",
+  finishing: "Tel/perde, vuruşlar ve akorlar hesaplanıyor",
 };
 
 /** What a queued or running transcription is doing. */
 export function stageLabel(project: Project): string {
   if (!project.stage) return "Sırada bekliyor";
   if (project.stage === "separating" && project.source === "voice") return "Vokal diğer enstrümanlardan ayrılıyor";
+  if (project.stage === "separating" && project.source === "song") return "Vokal müzikten ayrılıyor";
+  if (project.stage === "transcribing" && project.source === "song") return "Vuruşlar, akorlar ve melodi çözümleniyor";
   return STAGE_LABELS[project.stage];
 }
 
@@ -83,6 +89,7 @@ export const audioUrl = (id: string) => `${API_URL}/api${projectPath(id)}/audio`
 export const midiUrl = (id: string) => `${API_URL}/api${projectPath(id)}/midi`;
 export const tabUrl = (id: string) => `${API_URL}/api${projectPath(id)}/tab`;
 export const musicXmlUrl = (id: string) => `${API_URL}/api${projectPath(id)}/musicxml`;
+export const chordSheetUrl = (id: string) => `${API_URL}/api${projectPath(id)}/chordsheet`;
 
 export const listProjects = () => request<Project[]>("/projects");
 export const getModelInfo = () => request<ModelInfo>("/models");
@@ -94,11 +101,13 @@ export const modelLabel = (version: string) =>
     .map((part) => part.split("@")[0])
     .join(" + ");
 
-/** A finished transcription made by other models (or voice method) than the current ones. */
+/** The version new transcriptions of this kind get: the guitar models, or the voice / song method. */
+export const currentVersion = (source: Source, models: ModelInfo) =>
+  ({ guitar: models.version, voice: models.voice_version, song: models.song_version })[source];
+
+/** A finished transcription made by other models (or voice / song method) than the current ones. */
 export const isOutdated = (project: Project, models: ModelInfo | null) =>
-  models !== null &&
-  project.status === "completed" &&
-  project.model_version !== (project.source === "voice" ? models.voice_version : models.version);
+  models !== null && project.status === "completed" && project.model_version !== currentVersion(project.source, models);
 export const getProject = (id: string) => request<Project>(projectPath(id));
 export const deleteProject = (id: string) => request<void>(projectPath(id), { method: "DELETE" });
 /** Transcribe again; the options, when given, change the project's settings first. */
@@ -116,6 +125,24 @@ export const retranscribe = (
 };
 export const getTranscription = (id: string) =>
   request<Transcription>(`${projectPath(id)}/transcription`);
+/** Names and fingerings of chords, as shapes from a capo. */
+export const getVoicings = (body: VoicingRequest, signal?: AbortSignal) =>
+  request<Voicing[]>("/chords/voicings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+/** The sung pitch of a voice project; null for guitar projects. */
+export async function getPitchCurve(id: string): Promise<PitchCurve | null> {
+  try {
+    return await request<PitchCurve>(`${projectPath(id)}/pitch`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
 export const saveNotes = (id: string, notes: Note[], notation: Omit<NotesUpdate, "notes"> = {}) => {
   const body: NotesUpdate = { notes, ...notation };
   return request<Transcription>(`${projectPath(id)}/notes`, {

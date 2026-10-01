@@ -23,7 +23,11 @@ ml = [
     "torch>=2.3",
     "mir_eval>=0.7",
     "matplotlib>=3.7",
-    "demucs>=4.0",  # song mode: guitar separation
+    "demucs>=4.0",  # stem separation (guitar, vocals)
+    "beat-this>=1.1",  # song mode: beats and bar lines
+]
+train = [
+    "pyroomacoustics>=0.7",  # room microphone augmentation (simulated rooms)
 ]
 dev = [
     "pytest>=8.0",
