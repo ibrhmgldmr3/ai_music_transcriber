@@ -193,3 +193,21 @@ def test_fused_chords_follow_the_recognizer_where_the_notes_are_unclear():
     # A melody line gets no chords, whatever the recognizer says.
     melody = [Note(60 + i % 5, i * 0.5, i * 0.5 + 0.4) for i in range(16)]
     assert analyze(melody, 120, beats=beats, chord_scores=scores).chords == []
+
+
+# --- song mode: guitar where nobody sings ----------------------------------------------
+
+
+def test_guitar_notes_fill_the_stretches_without_singing():
+    from ml.inference.song import fill_instrumental
+
+    sung = [Note(67, 1.0, 1.5), Note(69, 1.5, 2.0), Note(67, 10.0, 11.0)]
+    guitar = [Note(52, t, t + 0.3, string=1, fret=7) for t in np.arange(0.0, 14.0, 0.5)]
+    out = fill_instrumental(sung, guitar)
+    added = sorted({round(n.start, 2) for n in out if n.pitch == 52})
+    # Before 1 s is under 4 s of silence; 2-10 s is a break; after 11 s is the outro.
+    assert added == [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5,
+                     11.5, 12.0, 12.5, 13.0, 13.5]  # fmt: skip
+    assert [n for n in out if n.pitch != 52] == sung
+    assert fill_instrumental([], guitar) == guitar  # nothing sung: the guitar part
+    assert fill_instrumental(sung, []) == sung

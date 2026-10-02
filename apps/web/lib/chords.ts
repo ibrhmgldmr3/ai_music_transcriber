@@ -94,10 +94,12 @@ export interface Strum {
 }
 
 /**
- * The chords' shapes strummed: with a `rhythm`, on its struck eighths or sixteenths of
- * every bar (down or up by the pendulum rule), else a downstroke on every beat. `beats`
- * are the grid's (the analysis'); `tuning` includes the capo, as the shapes' frets count
- * from it. Without beats, strums fall every 0.5 s.
+ * The chords' shapes strummed: with a `rhythm`, the song's pattern in every bar that
+ * starts at one of `barTimes` (down or up by the pendulum rule), else a downstroke on
+ * every beat. The pattern rather than each bar's own detected strums: those miss strums
+ * here and there, which leaves gaps that sound like missing beats. `beats` are the
+ * grid's (the analysis'); `tuning` includes the capo, as the shapes' frets count from
+ * it. Without beats, strums fall every 0.5 s.
  */
 export function strums(
   chords: SongChord[],
@@ -105,6 +107,7 @@ export function strums(
   voicings: ReadonlyMap<string, Voicing>,
   tuning: number[],
   rhythm: Rhythm | null = null,
+  barTimes: number[] = rhythm?.bar_times ?? [],
 ): Strum[] {
   const shape = (label: string) => {
     const frets = voicings.get(label)?.frets;
@@ -112,17 +115,17 @@ export function strums(
   };
   const at = (time: number) => chords.find((c) => c.start - 1e-3 <= time && time < c.end - 1e-3);
   const out: Strum[] = [];
-  if (rhythm && beats.length >= 2) {
-    rhythm.bars.forEach((hits, i) => {
-      const first = Math.round(beatPosition(beats, rhythm.bar_times[i]));
-      hits.forEach((hit, slot) => {
+  if (rhythm && rhythm.pattern.some(Boolean) && beats.length >= 2) {
+    for (const bar of barTimes) {
+      const first = Math.round(beatPosition(beats, bar));
+      rhythm.pattern.forEach((hit, slot) => {
         if (!hit) return;
         const time = beatTime(beats, first + slot / rhythm.per_beat);
         const chord = at(time);
         const pitches = chord && shape(chord.label);
         if (pitches) out.push({ time, pitches, down: slot % 2 === 0 });
       });
-    });
+    }
     return out;
   }
   for (const chord of chords) {

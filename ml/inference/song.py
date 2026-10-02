@@ -13,7 +13,8 @@ bass clear in each beat, becomes a slash chord (D/F#): on AAM, whose bass plays 
 root, that adds no wrong ones, and on GuitarSet it matches a few of the inversions
 played (scripts/benchmark_chords.py --bass). When a guitar note model is given and the
 song has a guitar, the chords it plays in the guitar stem are the strums of the
-strumming pattern (``music_core.rhythm``).
+strumming pattern (``music_core.rhythm``), and where nobody sings for a while (an intro,
+a guitar break, a solo) its notes fill the TAB, on the song's tuning and capo.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ from music_core.rhythm import strums_from_notes
 from music_core.tab import DEFAULT_NUM_FRETS, assign_tab, open_strings
 
 # Stored as the project's model_version; bump it when the method changes the result.
-SONG_VERSION = "song-btc-beatthis@2"
+SONG_VERSION = "song-btc-beatthis@3"
 SAMPLE_RATE = 44100
 CHORD_CHANGE_PENALTY = 1.0  # best on GuitarSet comp and AAM (scripts/benchmark_chords.py)
 # Slash chords: a bass held this clearly (share of the beat's bass) for this many beats.
@@ -52,6 +53,10 @@ CHORD_CHANGE_PENALTY = 1.0  # best on GuitarSet comp and AAM (scripts/benchmark_
 SLASH_SHARE = 0.8
 SLASH_BEATS = 2
 GUITAR_LEVEL = 0.1  # the guitar stem's share of the mix's level for a strumming pattern
+# Stretches with no sung note for this long take the guitar stem's notes instead, kept
+# this far from the sung notes on either side.
+INSTRUMENTAL_GAP = 4.0
+INSTRUMENTAL_MARGIN = 0.25
 
 
 @dataclass
@@ -82,7 +87,8 @@ def transcribe_song(
     """Chords, bars, keys and the sung melody of a song; ``capo=None`` picks one.
 
     ``separator`` has a ``stems(y, sample_rate, names)`` method (``GuitarSeparator``);
-    ``guitar_model`` (a ``Predictor``) transcribes the guitar stem for the strums.
+    ``guitar_model`` (a ``Predictor``) transcribes the guitar stem: its chords are the
+    strums, its notes fill the stretches without singing.
     """
     import librosa
 
@@ -117,11 +123,6 @@ def transcribe_song(
         lambda f: report(0.75 + 0.15 * f, "transcribing"),
     )
     report(0.9, "finishing")
-    strums = None
-    if guitar_model is not None and _level(stems["guitar"], y) >= GUITAR_LEVEL:
-        guitar = guitar_model.transcribe_signal(stems["guitar"], estimate_tempo=False)
-        strums = strums_from_notes(guitar.notes)
-    report(0.97, "finishing")
 
     symbols = _symbols(segments)
     sung = segment_notes(track, s)
@@ -134,6 +135,14 @@ def transcribe_song(
     tuning = list(open_strings(tuning_name, capo))
     melody, transpose = fit_to_range(segment_notes(track, s), min(tuning), max(tuning) + num_frets)
     melody = assign_tab(melody, tuning, num_frets)
+    strums = None
+    if guitar_model is not None and _level(stems["guitar"], y) >= GUITAR_LEVEL:
+        guitar = guitar_model.transcribe_signal(
+            stems["guitar"], estimate_tempo=False, tuning=tuning
+        ).notes
+        strums = strums_from_notes(guitar)
+        melody = fill_instrumental(melody, guitar)
+    report(0.97, "finishing")
     tempo, beats_per_measure, downbeat = meter(beats, downbeats)
     return SongResult(
         notes=melody,
@@ -158,6 +167,30 @@ def transcribe_song(
         else [],
         strums=strums,
     )
+
+
+def fill_instrumental(
+    melody: Sequence[Note],
+    guitar: Sequence[Note],
+    min_gap: float = INSTRUMENTAL_GAP,
+    margin: float = INSTRUMENTAL_MARGIN,
+) -> list[Note]:
+    """The melody plus the guitar notes that start in its gaps of ``min_gap`` seconds
+    or more (before the first sung note and after the last too), ``margin`` away from
+    the sung notes around them."""
+    sung = sorted(melody, key=lambda n: n.start)
+    gaps, sounding_until = [], 0.0
+    for note in sung:
+        if note.start - sounding_until >= min_gap:
+            gaps.append((sounding_until, note.start))
+        sounding_until = max(sounding_until, note.end)
+    gaps.append((sounding_until, float("inf")))  # after the last sung note
+    filled = [
+        n
+        for n in guitar
+        if any(a + (margin if a > 0 else 0.0) <= n.start < b - margin for a, b in gaps)
+    ]
+    return sorted([*sung, *filled], key=lambda n: (n.start, n.pitch))
 
 
 def _level(stem: np.ndarray, mix: np.ndarray) -> float:

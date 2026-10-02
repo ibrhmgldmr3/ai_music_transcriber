@@ -313,7 +313,14 @@ function Editor() {
   const chordStrums = useMemo(
     () =>
       chords && transcription
-        ? strums(chords, analysis?.beats ?? transcription.beats, voicings, tuning, analysis?.rhythm ?? null)
+        ? strums(
+            chords,
+            analysis?.beats ?? transcription.beats,
+            voicings,
+            tuning,
+            analysis?.rhythm ?? null,
+            analysis?.bars.map((b) => b.time),
+          )
         : undefined,
     [chords, transcription, analysis, voicings, tuning],
   );

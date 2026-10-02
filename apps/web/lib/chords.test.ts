@@ -58,6 +58,20 @@ describe("strums", () => {
     expect(rhythmCells(rhythm).map((c) => c.count + c.stroke).join(" ")).toBe("1↓ &· 2↓ &↑ 3· &↑ 4↓ &↑");
   });
 
+  it("plays the song's pattern in bars whose own strums were missed", () => {
+    const e: Voicing = { label: "E", name: "E", shape: "E", frets: [0, 2, 2, 1, 0, 0], difficulty: 1 };
+    const beats = [0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+    const rhythm = {
+      per_beat: 2,
+      pattern: [true, false, true, false, true, false, true, false],
+      text: "D-D-D-D-",
+      bars: [[true, false, false, false, false, false, false, false]], // only one strum found
+      bar_times: [0],
+    };
+    const out = strums([{ start: 0, end: 4, label: "E" }], beats, new Map([["E", e]]), [40, 45, 50, 55, 59, 64], rhythm, [0, 2]);
+    expect(out.map((s) => s.time)).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
+  });
+
   it("strums every half second without beats", () => {
     const e: Voicing = { label: "E", name: "E", shape: "E", frets: [0, 2, 2, 1, 0, 0], difficulty: 1 };
     expect(strums([{ start: 0, end: 1.2, label: "E" }], [], new Map([["E", e]]), [40, 45, 50, 55, 59, 64]).length).toBe(3);
