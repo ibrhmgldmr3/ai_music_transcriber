@@ -32,6 +32,8 @@ class ConvStack(nn.Module):
     """Spectrogram ``(B, bins, T)`` -> frame embeddings ``(B, T, embed_dim)``.
 
     Pooling is applied along frequency only, so the output keeps the label frame rate.
+    ``freq_pools`` is each block's pooling factor (2 by default); 1 keeps that block's
+    frequency resolution, e.g. for a fine-grained contour head.
     """
 
     def __init__(
@@ -40,13 +42,17 @@ class ConvStack(nn.Module):
         channels: Sequence[int] = (32, 64, 128),
         dropout: float = 0.25,
         embed_dim: int = 512,
+        freq_pools: Sequence[int] | None = None,
     ):
         super().__init__()
+        pools = tuple(freq_pools) if freq_pools else (2,) * len(channels)
+        if len(pools) != len(channels):
+            raise ValueError(f"freq_pools {pools} needs one factor per conv block {channels}")
         self.input_norm = nn.BatchNorm1d(n_bins)  # per-bin normalization of log features
         blocks, in_ch, freq = [], 1, n_bins
-        for out_ch in channels:
-            blocks.append(ConvBlock(in_ch, out_ch, pool_freq=2, dropout=dropout))
-            in_ch, freq = out_ch, freq // 2
+        for out_ch, pool in zip(channels, pools):
+            blocks.append(ConvBlock(in_ch, out_ch, pool_freq=pool, dropout=dropout))
+            in_ch, freq = out_ch, freq // pool
         if freq < 1:
             raise ValueError(f"Too many pooling stages for {n_bins} input bins")
         self.blocks = nn.Sequential(*blocks)
@@ -76,10 +82,14 @@ class CNN(nn.Module):
         conv_channels: Sequence[int] = (32, 64, 128),
         embed_dim: int = 512,
         dropout: float = 0.25,
+        freq_pools: Sequence[int] | None = None,
+        n_contour_bins: int | None = None,
     ):
         super().__init__()
-        self.encoder = ConvStack(n_bins, conv_channels, dropout, embed_dim)
-        self.heads = build_heads(embed_dim, heads, n_pitches, num_strings, num_classes, dropout)
+        self.encoder = ConvStack(n_bins, conv_channels, dropout, embed_dim, freq_pools)
+        self.heads = build_heads(
+            embed_dim, heads, n_pitches, num_strings, num_classes, dropout, n_contour_bins
+        )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         h = self.encoder(x)

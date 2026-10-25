@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from ml.models.heads import PITCH_HEADS
+from ml.models.heads import CONTOUR_HEAD, PITCH_HEADS
 
 
 class TranscriptionLoss(nn.Module):
@@ -15,6 +15,7 @@ class TranscriptionLoss(nn.Module):
     * onset / frame / offset: binary cross-entropy per (frame, pitch); onsets and offsets
       are sparse, so a ``pos_weight`` > 1 counteracts the class imbalance.
     * tab: cross-entropy over the string classes (0 = silent, k = fret k - 1).
+    * contour: binary cross-entropy against the soft (Gaussian-blurred) contour target.
     """
 
     def __init__(
@@ -23,14 +24,15 @@ class TranscriptionLoss(nn.Module):
         pos_weights: dict[str, float | None] | None = None,
     ):
         super().__init__()
-        self.weights = {"onset": 1.0, "frame": 1.0, "offset": 0.5, "tab": 1.0} | (weights or {})
+        defaults = {"onset": 1.0, "frame": 1.0, "offset": 0.5, "tab": 1.0, CONTOUR_HEAD: 1.0}
+        self.weights = defaults | (weights or {})
         self.pos_weights = {k: v for k, v in (pos_weights or {}).items() if v}
 
     def forward(
         self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]
     ) -> tuple[torch.Tensor, dict[str, float]]:
         losses: dict[str, torch.Tensor] = {}
-        for name in PITCH_HEADS:
+        for name in (*PITCH_HEADS, CONTOUR_HEAD):
             if name in outputs and name in batch:
                 logits = outputs[name]
                 pos_weight = self.pos_weights.get(name)

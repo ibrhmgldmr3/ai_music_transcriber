@@ -62,7 +62,7 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 |---|---|
 | `apps/web` | Next.js arayüzü: yükleme, proje listesi, editör, ayarlar |
 | `apps/api` | FastAPI + SQLAlchemy + Celery (transkripsiyon işleri) |
-| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle), `guitar_mixed_low.yaml` (C2'ye inen nota aralığı) |
+| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle), `guitar_mixed_low.yaml` (C2'ye inen nota aralığı), `guitar_contour.yaml` (perde eğrisi kafası) |
 | `ml/preprocessing` | ses yükleme, log-mel/CQT, JAMS ve tel başına MIDI anotasyonları, augmentation |
 | `ml/datasets` | GuitarSet, EGDB (sese hizalanmış etiketleriyle) ve Guitar-TECHS keşfi ve split'leri, PyTorch dataset; ölçümler için AAM (`aam.py`) ve GuitarSet vuruşları (`strums.py`) |
 | `ml/models` | `ConvStack`, `CNN`, `CRNN` (BiLSTM/GRU), çıkış kafaları; akor tanıyıcı BTC (`btc.py`, yalnızca çıkarım) |
@@ -72,6 +72,7 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 | `packages/music-core` | `Note`, MIDI, MusicXML, vuruş ızgarası (`timing.py`), tab optimizasyonu, ton/ölçü/akor analizi ve ton değişimleri (`analysis.py`), ritim kalıbı (`rhythm.py`), gitar akor şemaları, slash akorlar ve capo önerisi (`guitar_chords.py`); `music_core` olarak import edilir |
 | `packages/shared-types` | API şemalarının TypeScript karşılıkları |
 | `scripts` | veri indirme/hazırlama, eğitim, değerlendirme |
+| `notebooks` | Colab'da eğitim (perde eğrisi modeli) |
 
 ## Kurulum
 
@@ -549,6 +550,24 @@ Teknikler TAB'da (editör ve ASCII) ve MusicXML'de (her iki dizekte `hammer-on`/
 - **Sentez:** hammer-on, pull-off ve slide yeni bir pena sesi başlatmıyor; aynı telde çalan ses perdesini değiştiriyor (sıçrayarak ya da kayarak). Bend ve vibrato da aynı biçimlerle sesin perdesinde. Bu biçimler Python ile TypeScript'te ortak fixture'la eşit tutuluyor.
 
 Editörün nota panelinden her notanın tekniği, bend miktarı ve vibratosu değiştirilebiliyor.
+
+### Perde eğrisi modeli (Colab'da eğitim)
+
+Kuralların kaçırdıklarının çoğu nota modelinden geliyor: bend'li ve slide'lı geçişleri ayrı notalara bölmüyor. Sıradaki adım, perdeyi yarım ton yerine yarım tonun üçte biri (33 cent) çözünürlükle izleyen bir **kontur kafası** (Basic Pitch'teki gibi). Bend, vibrato ve slide bu çıkışta hareket eden bir aktivasyon olarak görünür; teknikler elle yazılmış harmonik toplamı izleyicisi yerine buradan okunabilir.
+
+- **Hedef:** GuitarSet'in heksafonik pickup'tan çıkan `pitch_contour` anotasyonları (her tel, 5.8 ms'de bir). Her nokta kendi kesirli perdesine 1 bin genişliğinde bir Gauss olarak işleniyor, 157 bin (C2–E6). Teller aynı karede birleşiyor. Perde kaydırma ve tempo değişimi augmentation'larında eğri de kayıyor (`variant_contours`).
+- **Model** (`ml/configs/guitar_contour.yaml`): aynı CNN + BiLSTM, girişi 36 bin/oktav CQT ve iki kat kare hızı (hop 512, ~86 kare/s; 9 Hz'lik vibratoyu izlemeye yetiyor). Son conv bloğu frekansı küçültmüyor (`freq_pools: [2, 2, 1]`). Kontur kafasının yanında nota kafaları da eğitiliyor. Kontur yalnızca GuitarSet'te var, model yalnızca onunla eğitiliyor; doğrulamada izlenen skor `val_contour_f1`.
+- **Veri:** 360 kayıt ve eğitim oyuncularının 240 kaydı için 7 varyant (`ps+1`, `ps-2`, `tempo0.9`, `noise`, `overdrive`, `room`, `codec`).
+
+Veri bu bilgisayarda hazırlanıyor, eğitim ücretsiz Colab'daki T4'te ([`notebooks/train_contour_colab.ipynb`](notebooks/train_contour_colab.ipynb)):
+
+```bash
+python scripts/prepare_dataset.py --config ml/configs/guitar_contour.yaml --augment \
+    --variants ps+1 ps-2 tempo0.9 noise overdrive room codec
+python scripts/pack_dataset.py --config ml/configs/guitar_contour.yaml   # -> guitarset_contour.zip
+```
+
+`guitarset_contour.zip` Drive'da `MyDrive/music_transcriber/` altına yükleniyor, notebook baştan sona çalıştırılıyor. Checkpoint'ler her epoch Drive'a yazıldığı için oturum koparsa notebook yeniden çalıştırılınca eğitim `last.pt`'den devam ediyor. En iyi skor (`best.pt`), erken durdurma sayacı ve `history.csv` de devam eden çalıştırmada korunuyor.
 
 ## Farklı akortlar ve capo
 

@@ -12,7 +12,7 @@ from torch.utils.data import Dataset
 
 from ml.preprocessing.augmentation import FeatureAugmenter
 
-TARGET_KEYS = ("onset", "frame", "offset", "tab")
+TARGET_KEYS = ("onset", "frame", "offset", "tab", "contour")
 PITCH_KEYS = ("onset", "frame", "offset")
 
 

@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import torch
+
 if TYPE_CHECKING:
     from ml.training.train import Trainer
 
@@ -41,6 +43,14 @@ class ModelCheckpoint(Callback):
         self.mode = mode
         self.best: float | None = None
 
+    def on_train_begin(self, trainer: Trainer) -> None:
+        # A resumed run keeps the best score so far, so the next epoch can't replace a
+        # better best.pt (Colab sessions end mid-training and resume from last.pt).
+        best = self.directory / "best.pt"
+        if trainer.start_epoch > 1 and best.exists():
+            metrics = torch.load(best, map_location="cpu", weights_only=True).get("metrics", {})
+            self.best = metrics.get(self.monitor)
+
     def on_epoch_end(self, trainer: Trainer, epoch: int, logs: dict[str, float]) -> None:
         trainer.save_checkpoint(self.directory / "last.pt", logs)
         current = logs.get(self.monitor)
@@ -54,30 +64,45 @@ class ModelCheckpoint(Callback):
 
 
 class EarlyStopping(Callback):
+    """Stops after ``patience`` epochs without improvement. With ``history`` (the
+    CSVLogger file), a resumed run replays the earlier epochs to restore its count."""
+
     def __init__(
         self,
         monitor: str = "val_frame_f1",
         mode: str = "max",
         patience: int = 15,
         min_delta: float = 0.0,
+        history: str | Path | None = None,
     ):
         self.monitor = monitor
         self.mode = mode
         self.patience = patience
         self.min_delta = min_delta
+        self.history = Path(history) if history else None
         self.best: float | None = None
         self.wait = 0
 
-    def on_epoch_end(self, trainer: Trainer, epoch: int, logs: dict[str, float]) -> None:
-        current = logs.get(self.monitor)
-        if current is None:
+    def on_train_begin(self, trainer: Trainer) -> None:
+        if trainer.start_epoch == 1 or self.history is None or not self.history.exists():
             return
+        with self.history.open(newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if int(float(row["epoch"])) < trainer.start_epoch and row.get(self.monitor):
+                    self._update(float(row[self.monitor]))
+
+    def _update(self, current: float) -> bool:
+        """Record one epoch's score; True when patience has run out."""
         if _improved(current, self.best, self.mode, self.min_delta):
             self.best, self.wait = current, 0
         else:
             self.wait += 1
-            if self.wait >= self.patience:
-                trainer.should_stop = True
+        return self.wait >= self.patience
+
+    def on_epoch_end(self, trainer: Trainer, epoch: int, logs: dict[str, float]) -> None:
+        current = logs.get(self.monitor)
+        if current is not None and self._update(current):
+            trainer.should_stop = True
 
 
 class CSVLogger(Callback):
@@ -91,6 +116,20 @@ class CSVLogger(Callback):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if trainer.start_epoch == 1 and self.path.exists():
             self.path.unlink()  # fresh run: start a new history
+        elif self.path.exists():
+            self._drop_from(trainer.start_epoch)
+
+    def _drop_from(self, epoch: int) -> None:
+        """Forget rows of epochs a resumed run will train again."""
+        with self.path.open(newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fields, rows = reader.fieldnames, list(reader)
+        kept = [row for row in rows if int(float(row["epoch"])) < epoch]
+        if fields and len(kept) < len(rows):
+            with self.path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(kept)
 
     def on_epoch_end(self, trainer: Trainer, epoch: int, logs: dict[str, float]) -> None:
         new_file = not self.path.exists() or self.path.stat().st_size == 0

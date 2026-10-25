@@ -31,11 +31,13 @@ class CRNN(nn.Module):
         rnn_hidden: int = 256,
         rnn_layers: int = 2,
         bidirectional: bool = True,
+        freq_pools: Sequence[int] | None = None,
+        n_contour_bins: int | None = None,
     ):
         super().__init__()
         if rnn_type not in RNN_TYPES:
             raise ValueError(f"Unknown rnn_type {rnn_type!r}; choose from {sorted(RNN_TYPES)}")
-        self.encoder = ConvStack(n_bins, conv_channels, dropout, embed_dim)
+        self.encoder = ConvStack(n_bins, conv_channels, dropout, embed_dim, freq_pools)
         self.rnn = RNN_TYPES[rnn_type](
             embed_dim,
             rnn_hidden,
@@ -49,7 +51,13 @@ class CRNN(nn.Module):
         # context). Without this skip, gradients reach the CNN only through the saturating
         # RNN and training stalls at the "predict nothing" baseline.
         self.heads = build_heads(
-            embed_dim + rnn_out, heads, n_pitches, num_strings, num_classes, dropout
+            embed_dim + rnn_out,
+            heads,
+            n_pitches,
+            num_strings,
+            num_classes,
+            dropout,
+            n_contour_bins,
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:

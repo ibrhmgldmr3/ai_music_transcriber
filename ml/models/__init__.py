@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from ml.config import feature_bins, num_pitches, tab_shape
+from ml.config import contour_bins, feature_bins, num_pitches, tab_shape
 from ml.models.cnn import CNN, ConvStack
 from ml.models.crnn import CRNN
 from ml.models.heads import PITCH_HEADS, PitchHead, TabHead, build_heads
@@ -37,6 +37,8 @@ def build_model(cfg: dict[str, Any]) -> nn.Module:
         conv_channels=tuple(model_cfg.get("conv_channels", (32, 64, 128))),
         embed_dim=model_cfg.get("embed_dim", 512),
         dropout=model_cfg.get("dropout", 0.25),
+        freq_pools=model_cfg.get("freq_pools"),
+        n_contour_bins=contour_bins(cfg),
     )
     name = model_cfg.get("name", "crnn")
     if name == "cnn":
