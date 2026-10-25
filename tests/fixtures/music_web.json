@@ -1804,5 +1804,236 @@
     "C7"
    ]
   }
- }
+ },
+ "techniques": [
+  "hammer_on",
+  "pull_off",
+  "slide"
+ ],
+ "technique_shapes": {
+  "bend_delay": 0.04,
+  "bend_rise": 0.1,
+  "vibrato_rate": 5.5,
+  "vibrato_depth_cents": 20.0,
+  "vibrato_delay": 0.1,
+  "slide_glide": 0.06
+ },
+ "tab_labels": [
+  {
+   "fret": 0,
+   "bend": null,
+   "vibrato": false,
+   "label": "0"
+  },
+  {
+   "fret": 0,
+   "bend": null,
+   "vibrato": true,
+   "label": "0~"
+  },
+  {
+   "fret": 0,
+   "bend": 0.5,
+   "vibrato": false,
+   "label": "0b"
+  },
+  {
+   "fret": 0,
+   "bend": 0.5,
+   "vibrato": true,
+   "label": "0b~"
+  },
+  {
+   "fret": 0,
+   "bend": 1.0,
+   "vibrato": false,
+   "label": "0b1"
+  },
+  {
+   "fret": 0,
+   "bend": 1.0,
+   "vibrato": true,
+   "label": "0b1~"
+  },
+  {
+   "fret": 0,
+   "bend": 1.5,
+   "vibrato": false,
+   "label": "0b"
+  },
+  {
+   "fret": 0,
+   "bend": 1.5,
+   "vibrato": true,
+   "label": "0b~"
+  },
+  {
+   "fret": 0,
+   "bend": 2.0,
+   "vibrato": false,
+   "label": "0b2"
+  },
+  {
+   "fret": 0,
+   "bend": 2.0,
+   "vibrato": true,
+   "label": "0b2~"
+  },
+  {
+   "fret": 0,
+   "bend": 3.0,
+   "vibrato": false,
+   "label": "0b3"
+  },
+  {
+   "fret": 0,
+   "bend": 3.0,
+   "vibrato": true,
+   "label": "0b3~"
+  },
+  {
+   "fret": 7,
+   "bend": null,
+   "vibrato": false,
+   "label": "7"
+  },
+  {
+   "fret": 7,
+   "bend": null,
+   "vibrato": true,
+   "label": "7~"
+  },
+  {
+   "fret": 7,
+   "bend": 0.5,
+   "vibrato": false,
+   "label": "7b"
+  },
+  {
+   "fret": 7,
+   "bend": 0.5,
+   "vibrato": true,
+   "label": "7b~"
+  },
+  {
+   "fret": 7,
+   "bend": 1.0,
+   "vibrato": false,
+   "label": "7b8"
+  },
+  {
+   "fret": 7,
+   "bend": 1.0,
+   "vibrato": true,
+   "label": "7b8~"
+  },
+  {
+   "fret": 7,
+   "bend": 1.5,
+   "vibrato": false,
+   "label": "7b"
+  },
+  {
+   "fret": 7,
+   "bend": 1.5,
+   "vibrato": true,
+   "label": "7b~"
+  },
+  {
+   "fret": 7,
+   "bend": 2.0,
+   "vibrato": false,
+   "label": "7b9"
+  },
+  {
+   "fret": 7,
+   "bend": 2.0,
+   "vibrato": true,
+   "label": "7b9~"
+  },
+  {
+   "fret": 7,
+   "bend": 3.0,
+   "vibrato": false,
+   "label": "7b10"
+  },
+  {
+   "fret": 7,
+   "bend": 3.0,
+   "vibrato": true,
+   "label": "7b10~"
+  },
+  {
+   "fret": 12,
+   "bend": null,
+   "vibrato": false,
+   "label": "12"
+  },
+  {
+   "fret": 12,
+   "bend": null,
+   "vibrato": true,
+   "label": "12~"
+  },
+  {
+   "fret": 12,
+   "bend": 0.5,
+   "vibrato": false,
+   "label": "12b"
+  },
+  {
+   "fret": 12,
+   "bend": 0.5,
+   "vibrato": true,
+   "label": "12b~"
+  },
+  {
+   "fret": 12,
+   "bend": 1.0,
+   "vibrato": false,
+   "label": "12b13"
+  },
+  {
+   "fret": 12,
+   "bend": 1.0,
+   "vibrato": true,
+   "label": "12b13~"
+  },
+  {
+   "fret": 12,
+   "bend": 1.5,
+   "vibrato": false,
+   "label": "12b"
+  },
+  {
+   "fret": 12,
+   "bend": 1.5,
+   "vibrato": true,
+   "label": "12b~"
+  },
+  {
+   "fret": 12,
+   "bend": 2.0,
+   "vibrato": false,
+   "label": "12b14"
+  },
+  {
+   "fret": 12,
+   "bend": 2.0,
+   "vibrato": true,
+   "label": "12b14~"
+  },
+  {
+   "fret": 12,
+   "bend": 3.0,
+   "vibrato": false,
+   "label": "12b15"
+  },
+  {
+   "fret": 12,
+   "bend": 3.0,
+   "vibrato": true,
+   "label": "12b15~"
+  }
+ ]
 }

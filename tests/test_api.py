@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -147,6 +148,9 @@ def test_allowed_origin_and_no_origin_pass(client):
         {"pitch": 60, "start": 1.0, "end": 0.5},
         {"pitch": 60, "start": 0.0, "end": 1.0, "string": 2},
         {"pitch": 128, "start": 0.0, "end": 1.0},
+        {"pitch": 60, "start": 0.0, "end": 1.0, "technique": "tapping"},
+        {"pitch": 60, "start": 0.0, "end": 1.0, "bend": 0},
+        {"pitch": 60, "start": 0.0, "end": 1.0, "bend": 5},
     ],
 )
 def test_invalid_notes_are_rejected(client, note):
@@ -158,6 +162,31 @@ def test_invalid_notes_are_rejected(client, note):
     )
     assert r.status_code == 422
     assert client.get(f"/api/projects/{pid}/transcription").status_code == 200
+
+
+def test_techniques_are_saved_and_written_to_the_tab(client):
+    pid = upload(client, wav_bytes()).json()["id"]
+    notes = [
+        {"pitch": 64, "start": 0.0, "end": 0.5, "string": 4, "fret": 5},
+        {"pitch": 66, "start": 0.5, "end": 1.0, "string": 4, "fret": 7, "technique": "hammer_on"},
+        {
+            "pitch": 69,
+            "start": 1.0,
+            "end": 2.0,
+            "string": 3,
+            "fret": 14,
+            "bend": 2,
+            "vibrato": True,
+        },
+    ]
+    saved = client.put(f"/api/projects/{pid}/notes", json={"notes": notes}).json()["notes"]
+    assert [(n["technique"], n["bend"], n["vibrato"]) for n in saved] == [
+        (None, None, False),
+        ("hammer_on", None, False),
+        (None, 2.0, True),
+    ]
+    tab = client.get(f"/api/projects/{pid}/tab").text
+    assert re.search(r"B\|5-*h7", tab) and "14b16~" in tab  # columns follow the timing
 
 
 def test_saving_assigns_missing_positions_and_keeps_chosen_ones(client):

@@ -8,9 +8,11 @@ purpose, regenerate it with ``python tests/test_web_fixtures.py``.
 import json
 from pathlib import Path
 
+from music_core import midi
 from music_core.analysis import KEY_NAMES, Key
 from music_core.musicxml import _spell
-from music_core.tab import TUNINGS
+from music_core.notes import TECHNIQUES, Note
+from music_core.tab import TUNINGS, _tab_label
 
 FIXTURE = Path(__file__).parent / "fixtures" / "music_web.json"
 
@@ -36,6 +38,22 @@ def build() -> dict:
         "tunings": {name: list(strings) for name, strings in TUNINGS.items()},
         "midi_range": [36, 96],
         "spelling": spelling,
+        "techniques": list(TECHNIQUES),
+        "technique_shapes": {
+            "bend_delay": midi.BEND_DELAY,
+            "bend_rise": midi.BEND_RISE,
+            "vibrato_rate": midi.VIBRATO_RATE,
+            "vibrato_depth_cents": round(midi.VIBRATO_DEPTH * 100, 6),
+            "vibrato_delay": midi.VIBRATO_DELAY,
+            "slide_glide": midi.SLIDE_GLIDE,
+        },
+        "tab_labels": [
+            {"fret": fret, "bend": bend, "vibrato": vibrato, "label": _tab_label(note)}
+            for fret in (0, 7, 12)
+            for bend in (None, 0.5, 1.0, 1.5, 2.0, 3.0)
+            for vibrato in (False, True)
+            for note in [Note(64 + fret, 0.0, 1.0, string=0, fret=fret, bend=bend, vibrato=vibrato)]
+        ],
     }
 
 

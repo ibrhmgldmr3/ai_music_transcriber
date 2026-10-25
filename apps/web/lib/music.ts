@@ -1,4 +1,4 @@
-import type { MusicKey } from "@music-transcriber/shared-types";
+import type { MusicKey, Note, Technique } from "@music-transcriber/shared-types";
 
 export const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 export const MAX_FRET = 24;
@@ -76,6 +76,26 @@ export function stringLabels(tuning: number[]): string[] {
   const labels = tuning.map((p) => NOTE_NAMES[pitchClass(p)]);
   if (labels.length > 0) labels[labels.length - 1] = labels[labels.length - 1].toLowerCase();
   return labels;
+}
+
+// Keep in sync with TECHNIQUES in packages/music-core/notes.py (tests/test_web_fixtures.py).
+export const TECHNIQUES: Technique[] = ["hammer_on", "pull_off", "slide"];
+export const TECHNIQUE_NAMES: Record<Technique, string> = {
+  hammer_on: "Hammer-on",
+  pull_off: "Pull-off",
+  slide: "Slide",
+};
+/** Letters written between two notes on a string, as in tab_to_ascii. */
+export const TECHNIQUE_MARKS: Record<Technique, string> = { hammer_on: "h", pull_off: "p", slide: "/" };
+
+/**
+ * A note's TAB label, mirroring _tab_label in packages/music-core/tab.py: the fret, its
+ * bend ("7b9": bent to sound like fret 9; "7b" for a fraction) and vibrato ("~").
+ */
+export function tabLabel(note: Pick<Note, "fret" | "bend" | "vibrato">): string {
+  let label = String(note.fret);
+  if (note.bend) label += Number.isInteger(note.bend) ? `b${(note.fret ?? 0) + note.bend}` : "b";
+  return label + (note.vibrato ? "~" : "");
 }
 
 export interface Position {

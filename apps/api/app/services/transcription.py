@@ -38,13 +38,15 @@ def get_predictor():
     )
 
 
-# The guitar method around the models: beats and chords tracked in the recording.
-GUITAR_METHOD = "beats-btc@1"
+# The guitar method around the models: beats and chords tracked in the recording,
+# playing techniques (bends, vibrato, slides) on the pitch curve.
+GUITAR_METHOD = "beats-btc-tech@1"
 
 
 @lru_cache(maxsize=1)
 def model_version() -> str:
-    """The installed models and method, e.g. ``guitar_v8@1a2b3c4d+guitar_v7@5e6f7a8b+beats-btc@1``.
+    """The installed models and method, e.g.
+    ``guitar_v10@1a2b3c4d+guitar_v7@5e6f7a8b+beats-btc-tech@1``.
 
     Checkpoint folder plus a fingerprint of the file (size and modification time), so a
     retrained or replaced model gets a new version. Cached like the predictor: both

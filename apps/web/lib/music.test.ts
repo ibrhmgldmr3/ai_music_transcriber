@@ -2,7 +2,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MusicKey } from "@music-transcriber/shared-types";
-import { KEY_NAMES, TUNINGS, beatPosition, beatTime, gridLines, midiToName, playablePositions, STANDARD_TUNING } from "./music";
+import {
+  KEY_NAMES,
+  TECHNIQUES,
+  TUNINGS,
+  beatPosition,
+  beatTime,
+  gridLines,
+  midiToName,
+  playablePositions,
+  STANDARD_TUNING,
+  tabLabel,
+} from "./music";
 
 // Written by the Python implementation: python tests/test_web_fixtures.py
 interface Fixture {
@@ -10,6 +21,8 @@ interface Fixture {
   tunings: Record<string, number[]>;
   midi_range: [number, number];
   spelling: Record<string, { tonic: number | null; mode: "major" | "minor" | null; fifths: number; names: string[] }>;
+  techniques: string[];
+  tab_labels: { fret: number; bend: number | null; vibrato: boolean; label: string }[];
 }
 const fixture: Fixture = JSON.parse(
   readFileSync(resolve(__dirname, "../../../tests/fixtures/music_web.json"), "utf-8"),
@@ -34,6 +47,13 @@ describe("mirrors music_core", () => {
     }
   });
 
+  it("knows the same techniques", () => {
+    expect(TECHNIQUES).toEqual(fixture.techniques);
+  });
+
+  it("labels bends and vibrato like the TAB export", () => {
+    for (const { label, ...note } of fixture.tab_labels) expect(tabLabel(note)).toBe(label);
+  });
 });
 
 describe("grid", () => {

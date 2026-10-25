@@ -133,6 +133,8 @@ th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
 .tab-fret-bg { fill: var(--panel); }
 .tab-fret text { fill: var(--text); font-family: ui-monospace, monospace; font-size: 13px; }
 .tab-fret.selected text { fill: var(--accent-2); font-weight: 700; }
+.tab-technique { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+.tab-technique-letter { fill: var(--muted); font-family: ui-monospace, monospace; font-size: 10px; }
 
 .stats-bar { display: flex; gap: 28px; flex-wrap: wrap; }
 .stats-bar strong { font-variant-numeric: tabular-nums; }

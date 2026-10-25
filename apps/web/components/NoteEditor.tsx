@@ -1,7 +1,7 @@
 "use client";
 
-import type { MusicKey, Note } from "@music-transcriber/shared-types";
-import { MAX_FRET, clamp, defaultPosition, midiToName, stringLabels } from "@/lib/music";
+import type { MusicKey, Note, Technique } from "@music-transcriber/shared-types";
+import { MAX_FRET, TECHNIQUES, TECHNIQUE_NAMES, clamp, defaultPosition, midiToName, stringLabels } from "@/lib/music";
 
 interface NoteEditorProps {
   note: Note | null;
@@ -18,6 +18,16 @@ interface NoteEditorProps {
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
+
+// Bends in semitones, named in tones as guitarists say them.
+const BENDS: [number, string][] = [
+  [0.5, "¼ ton"],
+  [1, "½ ton"],
+  [1.5, "¾ ton"],
+  [2, "1 ton"],
+  [2.5, "1¼ ton"],
+  [3, "1½ ton"],
+];
 
 /**
  * Edits the selected note. Pitch and position stay consistent: changing the fret changes
@@ -88,6 +98,9 @@ export default function NoteEditor({
     if (!Number.isNaN(value)) edit({ velocity: clamp(Math.round(value), 1, 127) });
   };
 
+  const setTechnique = (value: string) => edit({ technique: value === "" ? null : (value as Technique) });
+  const setBend = (value: string) => edit({ bend: value === "" ? null : Number(value) });
+
   return (
     <aside className="card note-editor stack">
       <div className="row between">
@@ -141,7 +154,33 @@ export default function NoteEditor({
             onChange={(e) => setFret(e.target.valueAsNumber)}
           />
         </label>
+        <label className="field" title="Önceki notadan, aynı telde, pena vurmadan geçiş">
+          Teknik
+          <select value={note.technique ?? ""} onChange={(e) => setTechnique(e.target.value)}>
+            <option value="">— (pena)</option>
+            {TECHNIQUES.map((t) => (
+              <option key={t} value={t}>
+                {TECHNIQUE_NAMES[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Bend
+          <select value={note.bend ?? ""} onChange={(e) => setBend(e.target.value)}>
+            <option value="">—</option>
+            {BENDS.map(([semitones, name]) => (
+              <option key={semitones} value={semitones}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      <label className="row compact">
+        <input type="checkbox" checked={note.vibrato ?? false} onChange={(e) => edit({ vibrato: e.target.checked })} />
+        Vibrato
+      </label>
 
       <p className="muted small">
         Süre: {(note.end - note.start).toFixed(2)} sn

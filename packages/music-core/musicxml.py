@@ -8,7 +8,9 @@ Rhythm: onsets are snapped to 16th notes of the beat grid (``music_core.analysis
 one tempo, or beats tracked in the recording), with bar lines where the analysis puts
 them (or at the given downbeat). Each event (a note or chord) lasts until its notes end
 or the next event starts, whichever comes first; gaps become rests and notes crossing a
-barline are tied. When the tracked beats speed up or slow down, measures carry the new
+barline are tied. Playing techniques go on both staves: hammer-ons, pull-offs and
+slides join a note to the previous one on its string, bends carry their semitones and
+vibrato is a wavy line. When the tracked beats speed up or slow down, measures carry the new
 tempo for playback (and a visible mark when it moved more than 8 %). The key signature,
 note spelling and chord symbols come from the same analysis, or from the song's keys.
 """
@@ -27,6 +29,8 @@ from music_core.tab import STANDARD_TUNING
 from music_core.timing import BeatGrid
 
 DIVISIONS = 4  # grid units per quarter note -> 16th-note resolution
+# Technique -> the letter written over a hammer-on / pull-off.
+_LEGATO = {"hammer_on": "H", "pull_off": "P"}
 GUITAR_MIDI_PROGRAM = 26  # 1-based General MIDI "Acoustic Guitar (steel)"
 
 # Grid units -> (MusicXML note type, dots); largest first for greedy decomposition.
@@ -62,6 +66,15 @@ DOCTYPE = (
     '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
     '"http://www.musicxml.org/dtds/partwise.dtd">'
 )
+
+
+@dataclass
+class _Links:
+    """Notes joined by a technique: ``leads`` maps a note (by id) to the technique of
+    the next note on its string; ``follows`` holds the notes that have such a leader."""
+
+    leads: dict[int, str]
+    follows: set[int]
 
 
 @dataclass
@@ -116,6 +129,7 @@ def notes_to_musicxml(
         return round(float(grid.position(time)) * DIVISIONS) - origin * DIVISIONS
 
     events = _quantize(notes, to_units)
+    links = _technique_links(events)
     total_units = events[-1].start + events[-1].length if events else 0
     symbols = analysis.chords if chords is None else chords
     if symbols:  # chords may go on after the last note (a song's outro)
@@ -196,7 +210,7 @@ def notes_to_musicxml(
                     _write_harmony(measure, chord, this_key, max(0, at - position))
                 _write_event(
                     measure, length, event_notes, tie_start, tie_stop, staff, voice, tuning,
-                    this_key, measure_units,
+                    this_key, measure_units, links,
                 )  # fmt: skip
                 position += length
 
@@ -237,6 +251,22 @@ def _quantize(notes: Sequence[Note], to_units: Callable[[float], int]) -> list[_
         events.append(_Event(start, end - start, sorted(members, key=lambda n: n.pitch)))
         cursor = end
     return events
+
+
+def _technique_links(events: Sequence[_Event]) -> _Links:
+    """Join each note marked with a technique to the previous written note on its string."""
+    links = _Links({}, set())
+    previous: dict[int, Note] = {}
+    for event in events:
+        for note in event.notes:
+            if note.string is None:
+                continue
+            before = previous.get(note.string)
+            if note.technique and before is not None:
+                links.leads[id(before)] = note.technique
+                links.follows.add(id(note))
+            previous[note.string] = note
+    return links
 
 
 def _one_per_string(notes: list[Note]) -> list[Note]:
@@ -364,6 +394,7 @@ def _write_event(
     tuning: Sequence[int],
     key: Key | None,
     measure_units: int,
+    links: _Links,
 ) -> None:
     value_type, dots = next((t, d) for u, t, d in _NOTE_VALUES if u == units)
     if not notes:
@@ -395,15 +426,36 @@ def _write_event(
         ET.SubElement(note, "staff").text = str(staff)
 
         positioned = staff == 2 and source.string is not None and source.fret is not None
-        if ties or positioned:
+        # Techniques mark a note's first piece (and a link's start the leading note's last).
+        leads = links.leads.get(id(source)) if not tie_start else None
+        follows = source.technique if not tie_stop and id(source) in links.follows else None
+        bend = source.bend if not tie_stop else None
+        vibrato = [kind for kind, on in (("start", not tie_stop), ("stop", not tie_start)) if on]
+        vibrato = vibrato if source.vibrato else []
+        if ties or positioned or leads or follows or bend or vibrato:
             notations = ET.SubElement(note, "notations")
             for kind in ties:
                 ET.SubElement(notations, "tied", type=kind)
-            if positioned:
+            for technique, kind in ((follows, "stop"), (leads, "start")):
+                if technique == "slide":
+                    ET.SubElement(notations, "slide", {"type": kind, "line-type": "solid"})
+            legato = [(t, k) for t, k in ((follows, "stop"), (leads, "start")) if t in _LEGATO]
+            if positioned or legato or bend:
                 technical = ET.SubElement(notations, "technical")
-                # MusicXML numbers strings from the highest (1) down.
-                ET.SubElement(technical, "string").text = str(len(tuning) - source.string)
-                ET.SubElement(technical, "fret").text = str(source.fret)
+                for technique, kind in legato:
+                    mark = ET.SubElement(technical, technique.replace("_", "-"), type=kind)
+                    if kind == "start":
+                        mark.text = _LEGATO[technique]
+                if bend:
+                    ET.SubElement(ET.SubElement(technical, "bend"), "bend-alter").text = f"{bend:g}"
+                if positioned:
+                    # MusicXML numbers strings from the highest (1) down.
+                    ET.SubElement(technical, "string").text = str(len(tuning) - source.string)
+                    ET.SubElement(technical, "fret").text = str(source.fret)
+            if vibrato:
+                ornaments = ET.SubElement(notations, "ornaments")
+                for kind in vibrato:
+                    ET.SubElement(ornaments, "wavy-line", type=kind)
 
 
 def _write_timing(

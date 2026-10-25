@@ -20,6 +20,30 @@ def staff_notes(root: ET.Element, staff: str) -> list[ET.Element]:
     return [n for n in root.iter("note") if n.findtext("staff") == staff]
 
 
+def test_techniques_on_both_staves():
+    notes = [
+        Note(64, 0.0, 1.0, string=4, fret=5),
+        Note(66, 1.0, 2.0, string=4, fret=7, technique="hammer_on"),
+        Note(64, 2.0, 3.0, string=4, fret=5, technique="slide"),
+        Note(69, 3.0, 6.0, string=3, fret=14, bend=2.0, vibrato=True),  # tied over a bar
+    ]
+    root = parse(notes_to_musicxml(notes, tempo=TEMPO))
+    for staff in ("1", "2"):
+        written = staff_notes(root, staff)
+        hammer = [
+            (n.find(".//hammer-on").get("type"), n.findtext(".//hammer-on"))
+            for n in written
+            if n.find(".//hammer-on") is not None
+        ]
+        assert hammer == [("start", "H"), ("stop", "")]
+        slides = [n.find(".//slide").get("type") for n in written if n.find(".//slide") is not None]
+        assert slides == ["start", "stop"]
+        bent = [n for n in written if n.find(".//bend") is not None]
+        assert [n.findtext(".//bend-alter") for n in bent] == ["2"]  # on the first piece only
+        waves = [w.get("type") for n in written for w in n.iter("wavy-line")]
+        assert waves == ["start", "stop"]
+
+
 def test_every_measure_is_full_on_both_staves():
     notes = [Note(60 + i % 5, i * 0.3, i * 0.3 + 0.2, string=3, fret=5) for i in range(30)]
     root = parse(notes_to_musicxml(notes, tempo=TEMPO))

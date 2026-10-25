@@ -298,6 +298,20 @@ def string_labels(tuning: Sequence[int] = STANDARD_TUNING) -> list[str]:
     return labels
 
 
+# Written between two notes on a string; a slide becomes "/" (up) or "\" (down).
+_TECHNIQUE_MARKS = {"hammer_on": "h", "pull_off": "p", "slide": "/"}
+
+
+def _tab_label(note: Note) -> str:
+    """A note's fret with its bend ("7b9": fret 7 bent to sound like fret 9; "7b" for a
+    bend of a quarter tone or other fraction) and vibrato ("~")."""
+    label = str(note.fret)
+    if note.bend:
+        whole = float(note.bend).is_integer()
+        label += f"b{note.fret + int(note.bend)}" if whole else "b"  # type: ignore[operator]
+    return label + ("~" if note.vibrato else "")
+
+
 def tab_to_ascii(
     notes: Sequence[Note],
     tuning: Sequence[int] = STANDARD_TUNING,
@@ -311,6 +325,8 @@ def tab_to_ascii(
     Columns follow the timing, but each event (a note or a chord) starts at least one
     dash after the previous one, so close notes never merge (5 then 6 must not read as
     fret 56). Chords stay vertically aligned and lines never break inside a number.
+    Techniques use the usual letters: ``5h7`` hammer-on, ``7p5`` pull-off, ``5/7`` and
+    ``7\\5`` slides, ``7b9`` bend, ``7~`` vibrato.
     With a capo, ``tuning`` includes it (frets count from the capo), the strings keep
     their own names and a "Capo N" line comes first.
     """
@@ -328,17 +344,30 @@ def tab_to_ascii(
         members = [placed[i] for i in group]
         col = max(int(round(members[0].start * columns_per_second)), cursor)
         events.append((col, members))
-        cursor = col + max(len(str(n.fret)) for n in members) + 1
+        cursor = col + max(len(_tab_label(n)) for n in members) + 1
 
     total_cols = cursor + 2
     rows = [["-"] * total_cols for _ in tuning]
+    joined: set[int] = set()  # columns a label (or a technique's mark) continues into
+    previous: dict[int, Note] = {}
     for col, members in events:
         for note in members:
-            for offset, char in enumerate(str(note.fret)):
-                rows[note.string][col + offset] = char  # type: ignore[index]
+            row = rows[note.string]  # type: ignore[index]
+            before = previous.get(note.string)  # type: ignore[arg-type]
+            mark = _TECHNIQUE_MARKS.get(note.technique or "")
+            if mark and before is not None and row[col - 1] == "-":
+                if note.technique == "slide":
+                    mark = "/" if note.pitch > before.pitch else "\\"
+                row[col - 1] = mark
+                joined.add(col)
+            label = _tab_label(note)
+            for offset, char in enumerate(label):
+                row[col + offset] = char
+            joined.update(range(col + 1, col + len(label)))
+            previous[note.string] = note  # type: ignore[index]
 
-    def inside_number(col: int) -> bool:  # a fret number continues from col - 1 into col
-        return any(row[col - 1].isdigit() and row[col].isdigit() for row in rows)
+    def inside_number(col: int) -> bool:  # a label continues from col - 1 into col
+        return col in joined
 
     labels = string_labels([pitch - capo for pitch in tuning])
     label_width = max(len(label) for label in labels)

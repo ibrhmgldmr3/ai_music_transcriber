@@ -2,6 +2,37 @@ from music_core.notes import Note
 from music_core.tab import assign_tab, fret_to_pitch, pitch_to_positions, tab_to_ascii
 
 
+def test_ascii_tab_writes_techniques():
+    notes = [
+        Note(64, 0.0, 0.25, string=4, fret=5),
+        Note(66, 0.25, 0.5, string=4, fret=7, technique="hammer_on"),
+        Note(64, 0.5, 0.75, string=4, fret=5, technique="pull_off"),
+        Note(67, 0.75, 1.0, string=4, fret=8, technique="slide"),
+        Note(64, 1.0, 1.25, string=4, fret=5, technique="slide"),
+        Note(69, 1.25, 2.0, string=3, fret=14, bend=2.0, vibrato=True),
+        Note(62, 2.0, 2.5, string=3, fret=7, bend=0.5),
+    ]
+    lines = tab_to_ascii(notes).splitlines()
+    assert lines[1].startswith("B|5h7p5/8\\5-")
+    assert "14b16~-7b-" in lines[2]
+
+
+def test_technique_without_a_previous_note_on_the_string_is_not_written():
+    notes = [
+        Note(64, 0.0, 0.5, string=4, fret=5),
+        Note(57, 0.5, 1.0, string=3, fret=2, technique="hammer_on"),
+    ]
+    assert "h" not in tab_to_ascii(notes)
+
+
+def test_ascii_tab_lines_never_break_inside_a_bend():
+    notes = [Note(69, i * 0.125, i * 0.125 + 0.1, string=3, fret=14, bend=2.0) for i in range(40)]
+    for block in tab_to_ascii(notes, line_width=23).split("\n\n"):
+        row = block.splitlines()[2]
+        assert row[2] in "1-", row  # no line starts inside "14b16"
+        assert row[-2] in "6-", row
+
+
 def test_pitch_to_positions_e4():
     assert set(pitch_to_positions(64)) == {(5, 0), (4, 5), (3, 9), (2, 14), (1, 19)}
 

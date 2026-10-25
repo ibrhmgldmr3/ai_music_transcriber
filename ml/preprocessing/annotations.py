@@ -51,6 +51,32 @@ def load_guitarset_jams(path: str | Path, tuning: Sequence[int] = STANDARD_TUNIN
     return sort_notes(notes)
 
 
+def load_guitarset_contours(path: str | Path) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """Per string: the ``pitch_contour`` annotation as (times, fractional MIDI pitch).
+
+    GuitarSet's contours follow each string of the hexaphonic pickup every 256 samples
+    at 44.1 kHz; unvoiced points are NaN.
+    """
+    with open(path, encoding="utf-8") as f:
+        jam = json.load(f)
+    contours = {}
+    for annotation in jam["annotations"]:
+        if annotation.get("namespace") != "pitch_contour":
+            continue
+        string = int(annotation["annotation_metadata"]["data_source"])
+        data = annotation["data"]
+        if isinstance(data, list):  # records instead of columns
+            data = {"time": [o["time"] for o in data], "value": [o["value"] for o in data]}
+        hz = np.array(
+            [
+                v["frequency"] if v.get("voiced") and v["frequency"] > 0 else np.nan
+                for v in data["value"]
+            ]
+        )
+        contours[string] = (np.asarray(data["time"], dtype=float), 69 + 12 * np.log2(hz / 440.0))
+    return contours
+
+
 def load_string_midi(
     path: str | Path,
     tuning: Sequence[int] = STANDARD_TUNING,

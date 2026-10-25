@@ -137,8 +137,10 @@ def transcribe_song(
     melody = assign_tab(melody, tuning, num_frets)
     strums = None
     if guitar_model is not None and _level(stems["guitar"], y) >= GUITAR_LEVEL:
+        # Techniques are not marked on the separated stem: the pitch curve has only been
+        # measured on solo recordings.
         guitar = guitar_model.transcribe_signal(
-            stems["guitar"], estimate_tempo=False, tuning=tuning
+            stems["guitar"], estimate_tempo=False, tuning=tuning, techniques=False
         ).notes
         strums = strums_from_notes(guitar)
         melody = fill_instrumental(melody, guitar)
