@@ -48,6 +48,36 @@ def test_strings_share_a_frame_and_out_of_range_points_are_dropped():
     assert target[2].sum() == pytest.approx(2 * target[2, :10].sum(), rel=1e-3)
 
 
+def contour_tracker(curve, n_bins=37, min_midi=40, weak_frames=()):
+    """A ContourTracker over Gaussian 'model output' following ``curve`` (MIDI per frame)."""
+    from ml.inference.techniques import ContourTracker
+
+    pitches = min_midi + np.arange(n_bins) / 3
+    probs = np.exp(-0.5 * ((pitches[None, :] - np.asarray(curve)[:, None]) * 3) ** 2)
+    probs[list(weak_frames)] = 0.01
+    return ContourTracker(probs, frame_rate=SR / HOP, min_midi=min_midi)
+
+
+def test_contour_tracker_follows_a_bend_between_bins():
+    curve = np.concatenate([np.full(10, 45.0), np.linspace(45.0, 46.5, 10), np.full(10, 46.5)])
+    tracker = contour_tracker(curve)
+    followed = tracker.track(0, 30, 43, 48).midi
+    np.testing.assert_allclose(followed, curve, atol=0.03)
+
+
+def test_contour_tracker_masks_other_notes_and_drops_unsure_frames():
+    from music_core.notes import Note
+
+    tracker = contour_tracker(np.full(20, 47.0), weak_frames=[15, 16])
+    other = Note(pitch=47, start=0.0, end=5 / tracker.frame_rate)
+    followed = tracker.track(0, 20, 45, 49, [other]).midi
+    assert np.isnan(followed[15:17]).all()
+    assert np.allclose(followed[6:15], 47.0, atol=0.03)
+    assert np.all(np.abs(followed[:5] - 47.0) > 0.5)  # its own pitch masked there
+    tracker.offset = 0.3  # a guitar tuned 30 cents sharp: curves on its own scale
+    assert np.allclose(tracker.track(6, 14, 45, 49).midi, 46.7, atol=0.03)
+
+
 def test_contours_follow_pitch_shift_and_time_stretch():
     contours = {0: (np.array([1.0, 2.0]), np.array([45.0, np.nan]))}
     shifted = variant_contours(contours, {"name": "ps-2", "pitch_shift": -2})

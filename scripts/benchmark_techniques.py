@@ -16,8 +16,13 @@ Notes: ``--notes reference`` uses the dataset's own notes (bends and vibrato onl
 matched to the reference by pitch and onset (50 ms). ``--set name=value`` overrides a
 ``TechniqueSettings`` field.
 
+``--tracker contour`` follows the pitch with the contour model (``--contour-checkpoint``,
+``ml/configs/guitar_contour.yaml``) instead of the harmonic sum. On GuitarSet the report
+also gives the curve's error against the pickup on the reference notes' frames.
+
     python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model
     python scripts/benchmark_techniques.py --dataset guitarset --players 05
+    python scripts/benchmark_techniques.py --dataset guitarset --players 05 --tracker contour
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from tqdm import tqdm
 
 from ml.datasets.idmt import GUITARS, find_takes, load_annotation
 from ml.inference.techniques import (
+    ContourTracker,
     PitchTracker,
     TechniqueSettings,
     detect_techniques,
@@ -66,6 +72,35 @@ def reference_curve(
     curve = midi[nearest].copy()
     curve[np.abs(times[nearest] - t) > 0.004] = np.nan
     return curve
+
+
+def make_tracker(y: np.ndarray, s: TechniqueSettings, args: argparse.Namespace) -> PitchTracker:
+    if args.tracker == "harmonic":
+        return PitchTracker(y, SAMPLE_RATE, s)
+    if not hasattr(make_tracker, "predictor"):
+        from ml.inference.predict import Predictor
+
+        make_tracker.predictor = Predictor.from_checkpoint(args.contour_checkpoint)
+    return ContourTracker.from_audio(y, make_tracker.predictor, s)
+
+
+def curve_errors(
+    notes: Sequence[Note], contours: dict, tracker: PitchTracker, counts: Counter
+) -> list[np.ndarray]:
+    """Cents between the followed and the pickup's pitch on each note's frames; counts
+    the pickup's voiced frames and those the tracker found any pitch on."""
+    errors = []
+    for note in notes:
+        others = [n for n in notes if n is not note and n.end > note.start and n.start < note.end]
+        reference = reference_curve(contours.get(note.string, ([], [])), note, tracker)
+        estimate = tracker.note_curve(note, others).midi[: len(reference)]
+        reference = reference[: len(estimate)]
+        voiced = ~np.isnan(reference)
+        both = voiced & ~np.isnan(estimate)
+        counts["curve_voiced"] += int(voiced.sum())
+        counts["curve_found"] += int(both.sum())
+        errors.append(100 * np.abs(estimate[both] - reference[both]))
+    return errors
 
 
 def curve_labels(curve: np.ndarray, pitch: int, rate: float, s: TechniqueSettings) -> dict:
@@ -146,11 +181,16 @@ def run_idmt(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) ->
         reference = [n.note for n in labeled]
         if args.notes == "reference":
             estimate = reference
-            est_labels = own_note_labels(reference, PitchTracker(y, SAMPLE_RATE, s))
+            est_labels = own_note_labels(reference, make_tracker(y, s, args))
             pairs = {i: i for i in range(len(reference))}
         else:
             estimate = detect_techniques(
-                transcribe("idmt", take.name, y, args), y, SAMPLE_RATE, s, STANDARD_TUNING
+                transcribe("idmt", take.name, y, args),
+                y,
+                SAMPLE_RATE,
+                s,
+                STANDARD_TUNING,
+                tracker=make_tracker(y, s, args),
             )
             est_labels = [{"bend": n.bend, "vibrato": n.vibrato} for n in estimate]
             pairs = match(reference, estimate)
@@ -187,15 +227,19 @@ def run_idmt(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) ->
             counts["slide", "wide_hit"] += len(wide & hits)
 
 
-def run_guitarset(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) -> None:
+def run_guitarset(
+    args: argparse.Namespace, s: TechniqueSettings, counts: Counter, errors: list | None = None
+) -> None:
     pattern = "*.jams" if args.mode == "all" else f"*_{args.mode}.jams"
     for jams in tqdm(sorted((GUITARSET / "annotation").glob(pattern))):
         if args.players and jams.stem[:2] not in args.players:
             continue
         y = load_audio(GUITARSET / "audio_mono-mic" / f"{jams.stem}_mic.wav", SAMPLE_RATE)
-        tracker = PitchTracker(y, SAMPLE_RATE, s)
+        tracker = make_tracker(y, s, args)
         contours = load_guitarset_contours(jams)
         reference = [n for n in load_guitarset_jams(jams) if n.string is not None]
+        if errors is not None:
+            errors += curve_errors(reference, contours, tracker, counts)
         ref_labels = [
             curve_labels(
                 reference_curve(contours.get(n.string, ([], [])), n, tracker),
@@ -210,7 +254,7 @@ def run_guitarset(args: argparse.Namespace, s: TechniqueSettings, counts: Counte
             pairs = {i: i for i in range(len(reference))}
         else:
             notes = transcribe("guitarset", jams.stem, y, args)
-            estimate = detect_techniques(notes, y, SAMPLE_RATE, s, STANDARD_TUNING)
+            estimate = detect_techniques(notes, y, SAMPLE_RATE, s, STANDARD_TUNING, tracker=tracker)
             est_labels = [{"bend": n.bend, "vibrato": n.vibrato} for n in estimate]
             pairs = match(reference, estimate)
             counts["notes_ref"] += len(reference)
@@ -237,7 +281,15 @@ def settings_from(overrides: Sequence[str]) -> TechniqueSettings:
     return replace(s, **changes)
 
 
-def report(counts: Counter, dataset: str, notes: str) -> None:
+def report(counts: Counter, dataset: str, notes: str, errors: Sequence | None = None) -> None:
+    if errors:
+        cents = np.concatenate(errors)
+        found = counts["curve_found"] / max(counts["curve_voiced"], 1)
+        print(
+            f"curve vs pickup: median {np.median(cents):.1f} cents, "
+            f"within 25 cents {np.mean(cents <= 25):.3f}, within 50 {np.mean(cents <= 50):.3f}, "
+            f"pickup-voiced frames with a pitch {found:.3f}"
+        )
     if counts["notes_ref"]:
         matched, total = counts["notes_matched"], counts["notes_ref"]
         print(f"reference notes matched by the transcription: {matched} / {total}")
@@ -282,13 +334,19 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--notes", choices=("reference", "model"), default="reference")
     parser.add_argument("--checkpoint", default="ml/checkpoints/guitar_v10/best.pt")
     parser.add_argument("--tab-checkpoint", default="ml/checkpoints/guitar_v7/best.pt")
+    parser.add_argument("--tracker", choices=("harmonic", "contour"), default="harmonic")
+    parser.add_argument("--contour-checkpoint", default="ml/checkpoints/guitar_contour/best.pt")
     parser.add_argument("--set", nargs="*", default=[], metavar="NAME=VALUE")
     args = parser.parse_args(argv)
     s = settings_from(args.set)
 
     counts: Counter = Counter()
-    (run_idmt if args.dataset == "idmt" else run_guitarset)(args, s, counts)
-    report(counts, args.dataset, args.notes)
+    errors: list = []
+    if args.dataset == "idmt":
+        run_idmt(args, s, counts)
+    else:
+        run_guitarset(args, s, counts, errors)
+    report(counts, args.dataset, args.notes, errors)
 
 
 if __name__ == "__main__":

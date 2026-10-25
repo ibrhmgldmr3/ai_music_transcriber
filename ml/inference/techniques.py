@@ -46,6 +46,7 @@ class TechniqueSettings:
     attack: float = 0.015  # seconds skipped at a note's start (the pick's noise)
     release: float = 0.01  # and at its end
     weak: float = 0.2  # frames with less harmonic energy than this x the note's median
+    contour_weak: float = 0.1  # ContourTracker: frames whose best pitch is less likely
     # Bends: the pitch held at least bend_min semitones above the fretted pitch for
     # bend_hold seconds, reached in at least bend_rise seconds (15 % -> 85 %) without a
     # step of more than bend_step of the bend between two frames. Chosen on IDMT-SMT-
@@ -85,9 +86,6 @@ class TechniqueSettings:
     # and the second's start.
     slide_window: tuple[float, float] = (0.08, 0.05)
     slide_max: int = 12  # semitones
-    # Seconds searched before the earlier and after the later of the first note's end
-    # and the second's start.
-    slide_window: tuple[float, float] = (0.08, 0.05)
     chord_tolerance: float = 0.05  # notes starting together form a chord: no slide
 
 
@@ -181,6 +179,78 @@ class PitchTracker:
             note.pitch + s.above,
             others,
         )
+
+
+class ContourTracker(PitchTracker):
+    """Pitch following on a contour model's output (``ml/configs/guitar_contour.yaml``).
+
+    The model gives, frame by frame, how likely each pitch is at a third of a semitone,
+    learned from GuitarSet's hexaphonic pickup. A note's curve is read from it like the
+    harmonic sum is: candidates around the note, other notes masked, the same continuous
+    path; a parabola through the log-probabilities refines each frame between bins (the
+    training targets are Gaussians, whose log is a parabola).
+    """
+
+    def __init__(
+        self,
+        probs: np.ndarray,
+        frame_rate: float,
+        min_midi: int,
+        bins_per_semitone: int = 3,
+        s: TechniqueSettings = TechniqueSettings(),
+    ):
+        self.s = s
+        self.frame_rate = frame_rate
+        self.probs = np.asarray(probs, dtype=np.float32)  # (frames, bins)
+        self.pitches = min_midi + np.arange(self.probs.shape[1]) / bins_per_semitone
+        self.bin = 1.0 / bins_per_semitone
+        self.offset = 0.0
+
+    @classmethod
+    def from_audio(
+        cls, y: np.ndarray, predictor, s: TechniqueSettings = TechniqueSettings()
+    ) -> ContourTracker:
+        """Run a contour model (a ``Predictor`` with a ``contour`` head) on ``y``."""
+        from ml.preprocessing.spectrogram import compute_features
+
+        cfg = predictor.cfg
+        probs = predictor.predict_features(compute_features(y, cfg))["contour"]
+        labels = cfg["labels"]
+        per_semitone = labels["contour"].get("bins_per_semitone", 3)
+        return cls(probs, predictor.frame_rate, labels["min_midi"], per_semitone, s)
+
+    def track(
+        self,
+        f0: int,
+        f1: int,
+        low: float,
+        high: float,
+        others: Sequence[Note] = (),
+    ) -> PitchCurve:
+        s = self.s
+        f0, f1 = max(0, f0), min(self.probs.shape[0], f1)
+        pitches = self.pitches - self.offset  # on the guitar's own tuning
+        inside = np.flatnonzero((pitches >= low - 1e-9) & (pitches <= high + 1e-9))
+        if f1 <= f0 or len(inside) < 3:
+            return PitchCurve(f0, np.zeros(0))
+        candidates = pitches[inside]
+        score = self.probs[f0:f1, inside].T.copy()  # (C, T)
+        for other in others:
+            a, b = max(self.frame(other.start), f0), min(self.frame(other.end), f1)
+            if b > a:
+                masked = np.abs(candidates - other.pitch) <= s.mask_width
+                score[masked, a - f0 : b - f0] = 0.0
+
+        cols = np.arange(score.shape[1])
+        k = np.clip(_continuous_path(score, candidates, s.jump), 1, len(candidates) - 2)
+        y0, y1, y2 = (np.log(np.maximum(score[k + d, cols], 1e-4)) for d in (-1, 0, 1))
+        curvature = y0 - 2 * y1 + y2
+        shift = np.divide(
+            0.5 * (y0 - y2), curvature, out=np.zeros_like(y1), where=curvature < -1e-6
+        )
+        midi = candidates[k] + np.clip(shift, -0.5, 0.5) * self.bin
+        midi[score[k, cols] < s.contour_weak] = np.nan
+        return PitchCurve(f0, midi)
 
 
 def _continuous_path(score: np.ndarray, candidates: np.ndarray, jump: float) -> np.ndarray:
@@ -350,8 +420,12 @@ def detect_techniques(
     s: TechniqueSettings = TechniqueSettings(),
     tuning: Sequence[int] | None = None,
     num_frets: int = DEFAULT_NUM_FRETS,
+    tracker: PitchTracker | None = None,
 ) -> list[Note]:
     """Mark slides, bends and vibrato on positioned notes (input order is kept).
+
+    The pitch curves come from ``tracker`` (e.g. a ``ContourTracker``), by default a
+    harmonic-sum ``PitchTracker`` on ``y``.
 
     A slide is played on one string, but the fingering optimizer, not knowing it, often
     put its two notes on two (4 in 10 of the slides found on IDMT): they are moved onto
@@ -359,7 +433,7 @@ def detect_techniques(
     named after its bent pitch is set back to the fretted note. ``tuning`` (open
     strings, capo included) is otherwise read from the notes' positions.
     """
-    tracker = PitchTracker(y, sample_rate, s)
+    tracker = tracker or PitchTracker(y, sample_rate, s)
     order = sorted(range(len(notes)), key=lambda i: (notes[i].start, notes[i].pitch))
     result = [replace(n, technique=None, bend=None, vibrato=False) for n in notes]
     curves = []

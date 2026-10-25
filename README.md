@@ -569,6 +569,17 @@ python scripts/pack_dataset.py --config ml/configs/guitar_contour.yaml   # -> gu
 
 `guitarset_contour.zip` Drive'da `MyDrive/music_transcriber/` altına yükleniyor, notebook baştan sona çalıştırılıyor. Checkpoint'ler her epoch Drive'a yazıldığı için oturum koparsa notebook yeniden çalıştırılınca eğitim `last.pt`'den devam ediyor. En iyi skor (`best.pt`), erken durdurma sayacı ve `history.csv` de devam eden çalıştırmada korunuyor.
 
+**İlk sonuç: kurallara henüz yetmiyor, uygulama harmonik toplamda kalıyor.** Model 80 epoch'luk eğitimin 76.'sında en iyi skora ulaştı (doğrulama oyuncusu 04: `val_contour_f1` 0.779, nota karesi F1 0.887). `ContourTracker` (`ml/inference/techniques.py`) modelin çıkışından notanın eğrisini harmonik toplamla aynı yolla okuyor (aday perdeler, diğer notaların maskelenmesi, sürekli yol; binler arası için log-olasılıkta parabol). `scripts/benchmark_techniques.py --tracker contour` ikisini karşılaştırıyor:
+
+| | Harmonik toplam | Kontur modeli |
+|---|---|---|
+| GuitarSet oyuncu 05 sololar, pickup'a göre ortanca hata / 25 cent içinde | 3.5 cent / %91.5 | 3.9 cent / %91.8 |
+| Vibrato derinliği (tepe-tepe, pickup'ta vibratolu notalar, pickup 0.34) | 0.28 yarım ton | 0.08 yarım ton |
+| IDMT LP, IDMT notalarıyla: bend F / vibrato F | 0.68 / 0.62 | 0.00 / 0.14 |
+| IDMT AR+FS, kurallar gevşetilince: bend F / vibrato F | 0.75 / 0.65 | 0.30 / 0.49 |
+
+Ortanca hata iyi görünüyor, çünkü karelerin çoğunda perde sabit. Ama eğri binler arasında akmıyor, bin bin basamak atlıyor: bir bin 33 cent, tipik bir vibrato ±17 cent, yani salınım çıkışı bir bin bile oynatmıyor. Bend'de ise basamaklar "slide gibi tırmanıyor" şartına takılıyor. Bundan da çok, notanın başı (pena atağı) boş ya da yukarıda çıkıyor: IDMT LP'nin 57 bend'inin 28'i "başlangıç bir perdeye oturmuyor" diye eleniyor. Temiz Gauss bir çıkışta `ContourTracker` binler arasındaki bend'i birkaç cent içinde izliyor (`tests/test_contour.py`); sorun okumada değil, modelin çıkışının biçiminde. Kafa, frekansı 512 boyutlu tek bir vektöre sıkıştıran katmandan sonra geliyor; Basic Pitch'te olduğu gibi frekans ekseni boyunca konvolüsyonla çalışan bir kontur kafası ve daha ince binler (yarım ton başına 5, 20 cent) sıradaki eğitim turunun adayları.
+
 ## Farklı akortlar ve capo
 
 Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.
