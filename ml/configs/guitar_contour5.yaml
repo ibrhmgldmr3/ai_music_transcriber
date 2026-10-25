@@ -1,0 +1,38 @@
+# Contour model, round 2. The first model (guitar_contour.yaml) read the contour from
+# the conv stack's pooled, projected embedding; its curve stepped from bin to bin,
+# flattened vibrato and failed the bend rules (README, "Perde eğrisi modeli"). Here:
+#
+# * the contour head is convolutional along frequency (ml/models/contour.py, as in
+#   Basic Pitch): each output bin is computed at its own pitch from a harmonic stack
+#   of the CQT, so a pitch moving between bins moves the activation with it;
+# * five bins per semitone (20 cents) instead of three, so a typical vibrato (+-17
+#   cents) spans bins instead of staying inside one.
+#
+# The note heads keep the CRNN path. Data and training as in round 1:
+#
+#   python scripts/prepare_dataset.py --config ml/configs/guitar_contour5.yaml --augment \
+#       --variants ps+1 ps-2 tempo0.9 noise overdrive room codec
+#   python scripts/pack_dataset.py --config ml/configs/guitar_contour5.yaml
+#   (Colab: notebooks/train_contour_colab.ipynb with CONFIG set to this file)
+extends: guitar_contour.yaml
+
+features:
+  n_bins: 420                # 7 octaves at 60 bins/octave: C2 (65 Hz) .. C9
+  bins_per_octave: 60        # = 12 x the contour's bins per semitone
+  fmin_midi: 36
+
+labels:
+  contour:
+    bins_per_semitone: 5     # 20 cents per bin; (88 - 36) * 5 + 1 = 261 bins
+    sigma: 1.0               # in bins: 20 cents
+
+model:
+  freq_pools: [2, 2, 2]      # note path only: 420 -> 52 rows, as wide as round 1's
+  contour_conv:
+    channels: 16
+    freq_kernel: 65          # 13 semitones, as Basic Pitch's 39 bins at 3 per semitone
+
+paths:
+  processed_dir: ml/data/processed/guitarset_contour5
+  splits_dir: ml/data/splits/guitarset_contour5
+  checkpoint_dir: ml/checkpoints/guitar_contour5

@@ -43,6 +43,22 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+CONTOUR_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5)
+
+
+def contour_metrics(probs: np.ndarray, target: np.ndarray) -> dict[str, float]:
+    """Contour F1 at the best of ``CONTOUR_THRESHOLDS`` (with its precision, recall and
+    threshold). A contour head can place the pitch well while staying unsure how loud
+    it is: the frequency-convolutional head found the target bin in most frames with
+    probabilities below 0.5, where a fixed 0.5 threshold scored nothing."""
+    best: dict[str, float] = {}
+    for threshold in CONTOUR_THRESHOLDS:
+        metrics = frame_metrics(probs >= threshold, target)
+        if not best or metrics["f1"] > best["f1"]:
+            best = {**metrics, "threshold": threshold}
+    return {f"val_contour_{k}": v for k, v in best.items()}
+
+
 class Trainer:
     """Training loop with AMP, gradient clipping, per-epoch validation and callbacks."""
 
@@ -133,8 +149,8 @@ class Trainer:
             if "contour" in outputs and "contour" in batch:
                 # Cells above half height: the true pitch's bin and its nearest neighbours.
                 n_bins = outputs["contour"].shape[-1]
-                probs = torch.sigmoid(outputs["contour"])
-                contour_pred.append((probs >= 0.5).cpu().numpy().reshape(-1, n_bins))
+                probs = torch.sigmoid(outputs["contour"]).half()
+                contour_pred.append(probs.cpu().numpy().reshape(-1, n_bins))
                 contour_true.append(batch["contour"].cpu().numpy().reshape(-1, n_bins) >= 0.5)
 
         logs = {"val_loss": loss_sum / max(steps, 1)}
@@ -151,8 +167,7 @@ class Trainer:
             )
             logs.update({f"val_tab_{k}": v for k, v in metrics.items()})
         if contour_pred:
-            metrics = frame_metrics(np.concatenate(contour_pred), np.concatenate(contour_true))
-            logs.update({f"val_contour_{k}": v for k, v in metrics.items()})
+            logs.update(contour_metrics(np.concatenate(contour_pred), np.concatenate(contour_true)))
         return logs
 
     def fit(self, train_loader: DataLoader, val_loader: DataLoader) -> None:

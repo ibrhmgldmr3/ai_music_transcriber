@@ -130,6 +130,59 @@ def test_a_contour_head_needs_contour_labels():
         build_model(cfg)
 
 
+CONFIG5 = CONFIG.with_name("guitar_contour5.yaml")
+
+
+def test_harmonic_stack_lines_up_overtones_at_the_fundamental():
+    from ml.models.contour import HarmonicStack
+
+    stack = HarmonicStack(bins_per_octave=60, harmonics=(0.5, 1, 2, 3))
+    x = torch.zeros(1, 300, 2)
+    fundamental = 40
+    for h in (1, 2, 3):
+        x[0, fundamental + round(60 * np.log2(h)), :] = h
+    out = stack(x)
+    assert out.shape == (1, 4, 300, 2)
+    assert out[0, 1:, fundamental, 0].tolist() == [1.0, 2.0, 3.0]
+    # The 0.5 channel looks an octave down: at the octave's bin it sees the fundamental.
+    assert out[0, 0, fundamental + 60, 0] == 1.0
+    assert out[0, 0, :60].abs().sum() == 0  # shifted in from below the spectrogram
+
+
+def test_conv_contour_head_keeps_the_frequency_axis():
+    cfg = load_config(CONFIG5, SMALL)
+    assert config_contour_bins(cfg) == 261
+    model = build_model(cfg)
+    assert model.contour is not None and "contour" not in model.heads
+    x = torch.randn(2, feature_bins(cfg), 24)
+    outputs = model(x)
+    assert outputs["contour"].shape == (2, 24, 261)
+    assert outputs["frame"].shape == (2, 24, num_pitches(cfg))
+    batch = {k: torch.zeros(2, 24, num_pitches(cfg)) for k in ("onset", "frame", "offset")}
+    batch["contour"] = torch.zeros(2, 24, 261)
+    loss, parts = TranscriptionLoss()(outputs, batch)
+    loss.backward()
+    assert "contour" in parts and model.contour.net[0].weight.grad is not None
+
+
+def test_contour_f1_finds_an_unsure_head_at_a_lower_threshold():
+    from ml.training.train import contour_metrics
+
+    target = np.zeros((50, 10), dtype=bool)
+    target[:, 4] = True
+    probs = np.full((50, 10), 0.02)
+    probs[:, 4] = 0.35  # right bin, low confidence: nothing passes 0.5
+    metrics = contour_metrics(probs, target)
+    assert metrics["val_contour_f1"] == pytest.approx(1.0)
+    assert metrics["val_contour_threshold"] == 0.1
+
+
+def test_a_conv_contour_head_needs_the_contours_resolution():
+    cfg = load_config(CONFIG5, {**SMALL, "features": {"bins_per_octave": 36, "n_bins": 252}})
+    with pytest.raises(ValueError, match="60 bins per octave"):
+        build_model(cfg)
+
+
 def write_history(path, scores):
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["epoch", "val_contour_f1"])

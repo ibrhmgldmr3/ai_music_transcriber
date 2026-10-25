@@ -580,6 +580,20 @@ python scripts/pack_dataset.py --config ml/configs/guitar_contour.yaml   # -> gu
 
 Ortanca hata iyi görünüyor, çünkü karelerin çoğunda perde sabit. Ama eğri binler arasında akmıyor, bin bin basamak atlıyor: bir bin 33 cent, tipik bir vibrato ±17 cent, yani salınım çıkışı bir bin bile oynatmıyor. Bend'de ise basamaklar "slide gibi tırmanıyor" şartına takılıyor. Bundan da çok, notanın başı (pena atağı) boş ya da yukarıda çıkıyor: IDMT LP'nin 57 bend'inin 28'i "başlangıç bir perdeye oturmuyor" diye eleniyor. Temiz Gauss bir çıkışta `ContourTracker` binler arasındaki bend'i birkaç cent içinde izliyor (`tests/test_contour.py`); sorun okumada değil, modelin çıkışının biçiminde. Kafa, frekansı 512 boyutlu tek bir vektöre sıkıştıran katmandan sonra geliyor; Basic Pitch'te olduğu gibi frekans ekseni boyunca konvolüsyonla çalışan bir kontur kafası ve daha ince binler (yarım ton başına 5, 20 cent) sıradaki eğitim turunun adayları.
 
+**2. tur** (`ml/configs/guitar_contour5.yaml`, `ml/models/contour.py`): kontur kafası artık gömme vektörünü değil spektrogramın kendisini okuyor ve frekans eksenini sonuna kadar koruyor. CQT oktav başına 60 bin (yarım ton başına 5, çıkışın çözünürlüğü), harmonik yığını (Basic Pitch gibi: spektrum 0.5, 1, 2, 3, 4, 5. harmoniğin aralığı kadar kaydırılıp kanal olarak üst üste konuyor, böylece bir temel frekansın bininde harmonikleri hizalanıyor), iki 5x5 konvolüsyon, frekansta 13 yarım tonluk geniş bir konvolüsyon ve 5x5 bir çıkış. Her çıkış bini kendi perdesinde hesaplanıyor, binler arasında kayan bir perde aktivasyonu da kaydırıyor. 261 bin (C2–E6). Nota kafaları CRNN yolunda kalıyor. Kafa 35 bin parametre; 16'lık batch 4060'ta 0.95 s, 5.6 GB.
+
+Bu kafa perdeyi doğru bine koyuyor ama emin olmadan: küçük bir denemede karelerin %80'inde en güçlü bin hedefteydi, olasılıklar ise 0.5'in altında kaldı. 0.5 eşikli doğrulama skoru bu yüzden sıfırdı; `best.pt` ilk epoch'ta kalır, eğitim erken dururdu. `val_contour_f1` artık 0.1–0.5 eşiklerinden en iyisinde ölçülüyor (`val_contour_threshold`). Eğri izleyici en güçlü yolu izlediği için bu güvensizlik eğriyi etkilemiyor.
+
+Aynı küçük denemede (GuitarSet'in 8 kaydı, 40 kısa epoch) oyuncu 05'in sololarında:
+
+| GuitarSet oyuncu 05 sololar | 1. tur (tam eğitim) | 2. tur kafası (küçük deneme) | 1. tur kafası (küçük deneme) |
+|---|---|---|---|
+| Vibrato derinliği (pickup 0.34) | 0.08 | 0.16 | 0.03 |
+| Pickup'ta vibratolu 42 notadan işaretlenen | 7 | 21 | 1 |
+| 25 cent içinde | %91.8 | %92.6 | %80.4 |
+
+Neredeyse hiç eğitilmeden bile vibratoyu tam eğitilmiş 1. turdan iyi izliyor. Veri 1. turla aynı kayıtlar ve varyantlar; zip yaklaşık 4 GB (`guitarset_contour5.zip`). Notebook'ta `ROUND = 2` varsayılan.
+
 ## Farklı akortlar ve capo
 
 Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.
