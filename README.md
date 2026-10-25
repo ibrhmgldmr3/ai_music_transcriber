@@ -19,6 +19,9 @@ Nota olayları (pitch, onset, offset, confidence)
 Tab optimizasyonu (Viterbi, minimum maliyetli parmak yolu) ──► Gitar TAB
    │
    ▼
+Çalma teknikleri (nota başına perde eğrisi: bend, vibrato, slide) ──► TAB / MusicXML işaretleri
+   │
+   ▼
 Müzik analizi (vuruş takibi, ton, ölçü ızgarası, akorlar, ritim kalıbı) ──► MusicXML armür, ölçü, tempo, akorlar
    │
    ▼
@@ -294,6 +297,8 @@ Notalar piyano rulosunda ve TAB'da doğrudan fareyle düzenlenir:
 | Silmek | **Delete** |
 | Geri al / yinele | **Ctrl+Z** / **Ctrl+Y** (ya da **Ctrl+Shift+Z**) ve araç çubuğundaki düğmeler; bir sürükleme tek adım sayılır |
 
+Nota panelinden ayrıca notanın tekniği (hammer-on, pull-off, slide: önceki notadan aynı telde, pena vurmadan), bend miktarı ve vibratosu seçilir; TAB bunları yay, çizgi ve `7b9`/`7~` etiketleriyle gösterir.
+
 Kaydedilmiş hale geri alınınca "kaydedilmemiş değişiklik" uyarısı da kalkar. Boş alana tıklamak oynatma konumunu oraya taşır.
 
 ## Yükleme, kayıt ve ilerleme
@@ -501,6 +506,50 @@ python scripts/benchmark_strums.py --players 05 --notes-cache ml/data/interim/no
 
 Sesten doğrudan onset almak (her tek nota, her ölü vuruş da onset) kalıp için fazla gürültülü çıktı; bu yüzden şarkı modunda da gitar kanalı nota modeliyle çözülüyor. Rock'ta çoğu oyuncu her 8'liği aşağı vuruyor; kural orada yukarı önerir (kalıp doğru, yönler değil). Bossa nova parmakla çalınıyor, yön kavramı zayıf.
 
+## Çalma teknikleri: bend, vibrato, slide
+
+Nota modeli hangi perdenin ne zaman çaldığını yarım ton çözünürlüğüyle buluyor. Notanın nasıl çalındığı ise perdenin zaman içindeki tam seyrinde görünüyor (`ml/inference/techniques.py`). Model eğitilmedi; kurallar her notanın kayıttan çıkarılan perde eğrisine uygulanıyor. Eşikler [IDMT-SMT-Guitar](https://zenodo.org/records/7544110)'ın (Kehling ve ark., 2014; CC BY-NC-ND) çalgıcının kendi etiketlediği bend, slide ve vibrato notalarıyla seçildi:
+
+- **Perde eğrisi:** notanın çevresindeki aday perdeler için (10 cent adımla, 2.5 yarım ton aşağıdan 3.5 yarım ton yukarıya) spektrumun ilk 6 harmoniğindeki enerji toplanıyor. Aynı anda çalan diğer notaların perdeleri maskeleniyor. Kare kare en güçlü adayı seçmek yerine Viterbi ile süreklilik aranıyor: perde değişimi yarım ton başına sabit bir bedel ödüyor, böylece nota sönerken başka bir tele atlamalar eleniyor. Bu bedel bilerek doğrusal: karesel bedel, atlamaları küçük adımlara bölüp bend'e benzeyen rampalar üretti. Kaydın akort sapması (gitarlar çoğu zaman A = 440 Hz'in biraz yanındadır; IDMT'nin bir çekiminde tellerin çoğu 35–45 cent tiz) notaların eğrilerinden ölçülüp düzeltiliyor; bütün eşikler gitarın kendi akortuna göre.
+- **Bend:** perde, basılan notanın en az 0.75 yarım ton üstünde en az 60 ms tutuluyor, oraya en az 30 ms'de çıkıyor (yeni basılan bir nota sıçrar) ve yolda iki kare arasında bend'in dörtte birinden büyük bir adım atmıyor. Son şart slide'ı ayırıyor: slide perde perde tırmanır (IDMT'de en büyük adım yolun ortanca %31'i, bend'de %16); bu şart olmadan IDMT'nin slide'larının %47'si bend sanılıyordu. Basılan perde notanın başının en alçak kısmından okunuyor, çünkü çalgıcı bükmeye pena ile birlikte başlayabiliyor (IDMT'nin lick'lerinde bend'li notaların ilk 40 ms'si ortanca 0.15–0.5 yarım ton yukarıdaydı). Hızlı bir bend'i nota modeli bazen bükülmüş perdeden yazıyor (IDMT'de bend'lerin beşte biri); bu notalar basılan perdeye geri çekiliyor. Miktar yarım ton yarımlarına yuvarlanıyor; TAB'da `7b9` (7. perde, 9. perdenin sesine bükülmüş), kesirli bend'lerde `7b`.
+- **Vibrato:** yavaş seyri çıkarılmış eğride 4–9 Hz'lik düzenli bir salınım (o periyotta öz-ilinti ≥ 0.2), tepe-tepe en az 0.15 yarım ton (IDMT'deki vibratoların ortanca derinliği 0.22), notanın en az 0.4 saniyesi duyulmuş. 4 Hz'den yavaş vibrato (IDMT'nin yavaş çekimleri, 2–3 Hz) aranmıyor: yakaladığından çok yanlış işaretledi. TAB'da `7~`.
+- **Slide:** art arda iki nota, ikincisi birincinin bittiği yerde başlıyor (en çok 12 ms boşluk: ses hiç kesilmediği için nota modeli ikinci notayı birincinin bittiği karede başlatıyor; IDMT'de slide sanılan pena geçişlerinde boşluk ortanca 46 ms'ydi); arada perde 20–80 ms iki notanın arasında kalıyor ve ikinciye doğru ilerliyor. Slide tek telde çalınır, ama parmak yolu optimizer'ı bunu bilmeden iki notayı sık sık iki ayrı tele koyuyor (IDMT'de bulunan slide'ların %40'ında); slide bulununca ikisi bir tele alınıyor (ikinci not birincinin teline, olmazsa tersi). Bir perdelik slide legatodan ayrılamıyor, aranmıyor. TAB'da `5/7`, `7\5`.
+- **Hammer-on / pull-off tespit edilmiyor.** Bunların bıraktığı iz (pena vuruşundan daha zayıf bir atak) GuitarSet'te pena ile çalınmış notalardan ayrılmadı: aynı perdenin yeniden vurulduğu geçişlerle perde değişen geçişlerin yüksek frekanslı atak dağılımı neredeyse aynıydı (ortanca oran 0.71'e 0.63). IDMT'de bu teknikler yok; etiketli bir kayıt olmadan doğrulanamadıkları için yalnızca editörden elle işaretlenebiliyorlar (TAB'da `5h7`, `7p5`).
+
+Ölçüm (`scripts/benchmark_techniques.py`): IDMT'nin 2. alt kümesi, tek çalgıcı, üç elektro gitar (AR, FS, LP), 261 çekim; kromatik dizilerin yanında tek tek bend, slide ve vibrato çekimleri ve bunları karıştıran lick'ler. Eşikler AR ve FS ile seçildi; aşağıdaki sayılar hiç bakılmadan bırakılan LP gitarında. "IDMT notalarıyla" yalnızca perde eğrisi ve kuralları ölçüyor; "modelin notalarıyla" uygulamanın gerçekte yaptığını (V10 + V7 transkripsiyonu, ardından teknikler).
+
+```bash
+python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes reference
+python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model
+```
+
+Veri: Zenodo'daki `IDMT-SMT-GUITAR_V2.zip` (1.3 GB) `ml/data/raw/idmt` altına açılır; yalnızca 1–3. alt kümeler gerekiyor (akor ve ritim için olan 4. alt küme kullanılmıyor). Yükleyici `ml/datasets/idmt.py`.
+
+| IDMT, LP gitarı | Bend P / R | Vibrato P / R | Slide P / R |
+|---|---|---|---|
+| IDMT'nin notalarıyla | 0.87 / 0.56 | 0.87 / 0.48 | (notalar ayrı değil) |
+| **Modelin notalarıyla** | **0.75 / 0.21** | **0.82 / 0.33** | **0.83 / 0.14** |
+
+Slide'da ilk kurallar (aynı tel, 120 ms'ye kadar boşluk) AR+FS'de 0.16 kesinlik veriyordu; boşluk ve süre şartlarıyla 0.85. Normal notaların hemen hiçbiri işaretlenmiyor (bend %0, vibrato %0.1). İşaretlenenler çoğunlukla doğru, ama bend, vibrato ve slide'ların çoğu kaçıyor. Kaçırmanın büyük kısmı nota modelinden geliyor: IDMT'nin bend'lerinin dörtte birinin yakınında model hiç nota yazmıyor, AR+FS'de slide'ların üçte ikisinde model, kuralın bakabileceği iki ayrı nota üretmiyor. IDMT tek çalgıcı ve tek kayıt düzeni; LP testi ancak gitar farkını sınıyor.
+
+GuitarSet'te teknik etiketi yok, ama her tel heksafonik pickup ile ayrı ayrı izlenmiş. Aynı kurallar bu referans eğriye uygulanınca etiket, mikrofon kaydından çıkarılan eğriye uygulanınca tahmin oluyor; yani ölçülen, karışık bir mikrofon kaydında eğrinin ne kadar iyi izlendiği (`--dataset guitarset`):
+
+| GuitarSet sololar, mikrofon kaydı | Sonuç |
+|---|---|
+| Perde eğrisi, oyuncu 05: ortanca hata / 25 cent içinde | 3.5 cent / %92 |
+| Bend, oyuncu 00–04 | işaretlenenlerin %79'u pickup eğrisinde de bend* |
+| Vibrato, oyuncu 00–04 | P 0.69, R 0.65 |
+| Süre | dakikalık kayıt başına ~0.3 s (CPU) |
+
+\* Bend'de yalnızca kesinlik anlamlı: notanın başının en alçak kısmını basılan perde sayan kural, pickup eğrilerindeki atak çukurlarını da bend'e çeviriyor, bu yüzden pickup'tan çıkan referans bend'ler şişiyor (oyuncu 00–04'te 190). GuitarSet'te gerçek bend az. Teknikler şarkı modunda ayrılmış gitar kanalında işaretlenmiyor; eğri yalnızca tek başına kaydedilmiş gitarda ölçüldü.
+
+Teknikler TAB'da (editör ve ASCII) ve MusicXML'de (her iki dizekte `hammer-on`/`pull-off`, `slide`, `bend`, vibrato için dalgalı çizgi; çıktı MusicXML 4.0 şemasına göre geçerli) yazılıyor, MIDI'de ve editördeki **Dinle: Notalar** sentezinde duyuluyor:
+
+- **MIDI:** pitch bend tüm kanalı büktüğü için teknikli dosyalarda her tel kendi kanalında (Guitar Pro'nun da yazdığı "MIDI gitar" düzeni), bend aralığı bir oktav (RPN 0). Bend pena vuruşundan 40 ms sonra başlıyor ve 100 ms'de bükülmüş perdeye çıkıyor, vibrato 5.5 Hz'de ±20 cent, slide sonraki notanın başladığı yerde biten 60 ms'lik bir kayma (ilk nota o ana kadar sürüyor). Hammer-on ve pull-off %30 daha yumuşak çalınıyor. Tekniksiz dosyalar eskisi gibi tek kanallı.
+- **Sentez:** hammer-on, pull-off ve slide yeni bir pena sesi başlatmıyor; aynı telde çalan ses perdesini değiştiriyor (sıçrayarak ya da kayarak). Bend ve vibrato da aynı biçimlerle sesin perdesinde. Bu biçimler Python ile TypeScript'te ortak fixture'la eşit tutuluyor.
+
+Editörün nota panelinden her notanın tekniği, bend miktarı ve vibratosu değiştirilebiliyor.
+
 ## Farklı akortlar ve capo
 
 Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.
@@ -528,9 +577,9 @@ V9 standart akortta V8 ile aynı sonucu veriyor. Diğer test setlerinde de aynı
 
 ## Dışa aktarma
 
-- **MIDI**: notalar saniye cinsinden (kayıtla hizalı kalır), ölçü ve ton bilgisiyle. Vuruş takibinde her vuruşun temposu yazılır (tempo haritası), böylece DAW'daki vuruş ve ölçüler müziğinkilerle çakışır; ilk ölçü çizgisinden önceki kısım tam vuruşlu bir anakruz ölçüsüdür. Tek tempoda tek tempo yazılır.
+- **MIDI**: notalar saniye cinsinden (kayıtla hizalı kalır), ölçü ve ton bilgisiyle; çalma teknikleri pitch bend olarak, tel başına bir kanalda ([Çalma teknikleri](#çalma-teknikleri-bend-vibrato-slide)). Vuruş takibinde her vuruşun temposu yazılır (tempo haritası), böylece DAW'daki vuruş ve ölçüler müziğinkilerle çakışır; ilk ölçü çizgisinden önceki kısım tam vuruşlu bir anakruz ölçüsüdür. Tek tempoda tek tempo yazılır.
 - **MusicXML**: tek gitar partisi, iki dizek (standart nota + 6 telli TAB, her notanın tel/perdesi) ve akor sembolleri (slash akorlarda basıyla). Onset'ler vuruş ızgarasının 16'lıklarına hizalanır; ilk ölçü, ilk notadan önceki ölçü başında başlar. Ölçü çizgisini aşan notalar bağlanır, boşluklar sus olur. Vuruş takibinde tempo değiştiği ölçülere çalma temposu (%2'den büyük değişim) ve metronom işareti (%8'den büyük) yazılır; ton değiştiren şarkılarda yeni armür. Çıktı resmi MusicXML 4.0 şemasına göre geçerlidir; MuseScore ve Guitar Pro (Dosya → İçe aktar) açar.
-- **ASCII TAB**: düz metin; yakın notalar birleşmez, akorlar hizalıdır.
+- **ASCII TAB**: düz metin; yakın notalar birleşmez, akorlar hizalıdır. Çalma teknikleri alışılmış harflerle yazılır (`5h7`, `7p5`, `5/7`, `7b9`, `7~`; bkz. [Çalma teknikleri](#çalma-teknikleri-bend-vibrato-slide)).
 
 Gitar ve şarkı projelerinde vuruşlar kayıttan takip edilir ([Vuruş takibi](#vuruş-takibi-metronomsuz-kayıtlar)); BPM alanı ortanca vuruşun temposunu gösterir. Vuruş takibi kapatılınca ya da yokken (ses projeleri) tempo, modelin onset tahminlerinden bulunur (GuitarSet testinde yarım/iki katı hatalar dahil %82 isabet; ses tabanlı `beat_track` ile %70). Editördeki **BPM** alanından düzeltilip kaydedildiğinde ızgara, metronom, MIDI ve MusicXML bu sabit tempoya göre yazılır.
 
@@ -615,7 +664,7 @@ pytest                        # Python: API, analiz, MusicXML, veri setleri, mod
 cd apps/web && npm test       # Web (Vitest)
 ```
 
-Web uygulaması nota adlandırmayı ve ölçü numaralandırmayı TypeScript'te `music_core` ile aynı şekilde yapıyor. İkisinin ayrışmaması için Python'un ürettiği ortak bir fixture (`tests/fixtures/music_web.json`) her iki tarafta da test ediliyor. Python tarafı bilerek değiştirildiğinde fixture'ı yeniden üretmek için:
+Web uygulaması nota adlandırmayı, ölçü numaralandırmayı ve TAB etiketlerini TypeScript'te `music_core` ile aynı şekilde yapıyor. İkisinin ayrışmaması için Python'un ürettiği ortak bir fixture (`tests/fixtures/music_web.json`) her iki tarafta da test ediliyor. Python tarafı bilerek değiştirildiğinde fixture'ı yeniden üretmek için:
 
 ```bash
 python tests/test_web_fixtures.py

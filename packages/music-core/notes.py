@@ -21,6 +21,10 @@ _NAME_RE = re.compile(r"^([A-Ga-g])([#b]?)(-?\d+)$")
 A4_MIDI = 69
 A4_HZ = 440.0
 
+# How a note is reached from the previous note on its string, without picking it again.
+TECHNIQUES = ("hammer_on", "pull_off", "slide")
+MAX_BEND = 4.0  # semitones
+
 
 @dataclass
 class Note:
@@ -29,6 +33,10 @@ class Note:
     ``string`` / ``fret`` are optional guitar positions: string 0 is the lowest string
     (low E in standard tuning) and fret 0 is the open string. ``confidence`` is the
     model's certainty in [0, 1] (None for ground truth or hand-entered notes).
+
+    Playing techniques: ``technique`` (one of ``TECHNIQUES``) says how the note follows
+    the previous note on its string; ``bend`` is how many semitones the note is bent up
+    from ``pitch`` (the fretted note); ``vibrato`` marks a note played with vibrato.
     """
 
     pitch: int
@@ -38,10 +46,17 @@ class Note:
     string: int | None = None
     fret: int | None = None
     confidence: float | None = None
+    technique: str | None = None
+    bend: float | None = None
+    vibrato: bool = False
 
     def __post_init__(self) -> None:
         if self.end < self.start:
             raise ValueError(f"Note end ({self.end}) is before its start ({self.start})")
+        if self.technique is not None and self.technique not in TECHNIQUES:
+            raise ValueError(f"Unknown technique {self.technique!r}; expected one of {TECHNIQUES}")
+        if self.bend is not None and not 0 < self.bend <= MAX_BEND:
+            raise ValueError(f"Bend must be in (0, {MAX_BEND}] semitones, got {self.bend}")
 
     @property
     def duration(self) -> float:

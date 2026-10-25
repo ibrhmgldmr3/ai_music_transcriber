@@ -211,8 +211,12 @@ class Predictor:
         separator: Callable[[np.ndarray, int], np.ndarray] | None = None,
         tuning: Sequence[int] | None = None,
         progress: ProgressCallback | None = None,
+        techniques: bool = True,
     ) -> TranscriptionResult:
-        """``transcribe`` for mono audio at the model's sample rate (``cfg.audio``)."""
+        """``transcribe`` for mono audio at the model's sample rate (``cfg.audio``).
+
+        ``techniques``: mark bends, vibrato and slides (``ml.inference.techniques``) on
+        notes that have positions."""
         report = progress or (lambda fraction, stage: None)
         # Share of the job before the model runs: separation takes about as long as the rest.
         model_start = 0.5 if separator is not None else 0.05
@@ -228,6 +232,10 @@ class Predictor:
         )
         report(0.95, "finishing")
         notes = self.decode(probs, tuning)
+        if techniques and self.cfg.get("tab"):
+            from ml.inference.techniques import detect_techniques
+
+            notes = detect_techniques(notes, y, sr, tuning=list(tuning or self.tuning))
         tempo = _estimate_tempo(probs, y, sr, audio["hop_length"]) if estimate_tempo else None
         if tempo is not None:
             # The bar grid (MusicXML, editor) needs a much finer tempo than the estimate.

@@ -49,7 +49,16 @@ export interface Note {
   fret: number | null;
   /** Model confidence in [0, 1]; null for hand-entered notes. */
   confidence: number | null;
+  /** How the note follows the previous note on its string (not picked again). */
+  technique?: Technique | null;
+  /** Semitones the note is bent up from `pitch` (the fretted note). */
+  bend?: number | null;
+  /** Played with vibrato. */
+  vibrato?: boolean;
 }
+
+/** Keep in sync with TECHNIQUES in packages/music-core/notes.py. */
+export type Technique = "hammer_on" | "pull_off" | "slide";
 
 export interface Project {
   id: string;

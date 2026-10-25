@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Note } from "@music-transcriber/shared-types";
 import type { Strum } from "./chords";
+import { VIBRATO_DEPTH, VIBRATO_RATE, synthVoices, type SynthVoice } from "./techniques";
 
 /** Seconds of media time scheduled ahead of the playhead. */
 const LOOKAHEAD = 0.2;
@@ -76,6 +77,33 @@ function click(ctx: BaseAudioContext, accent: boolean): AudioBuffer {
   return buffer;
 }
 
+/**
+ * Gives a voice its pitch changes (bends, slides, hammer-ons and pull-offs) on the
+ * source's detune and its vibrato as a low-frequency oscillator added to it. `when` is
+ * the audio time of the voice's start, `rate` the playback rate. Returns the nodes to
+ * disconnect when the voice ends.
+ */
+function applyPitch(ctx: BaseAudioContext, source: AudioBufferSourceNode, v: SynthVoice, when: number, rate: number) {
+  const at = (t: number) => when + Math.max(0, t - v.start) / rate;
+  source.detune.setValueAtTime(0, when);
+  for (const p of [...v.points].sort((a, b) => a.time - b.time)) {
+    if (p.ramp) source.detune.linearRampToValueAtTime(p.cents, at(p.time));
+    else source.detune.setValueAtTime(p.cents, at(p.time));
+  }
+  const nodes: AudioNode[] = [];
+  for (const vibrato of v.vibratos) {
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = VIBRATO_RATE * rate;
+    const depth = ctx.createGain();
+    depth.gain.value = VIBRATO_DEPTH;
+    lfo.connect(depth).connect(source.detune);
+    lfo.start(at(vibrato.start));
+    lfo.stop(at(vibrato.end));
+    nodes.push(lfo, depth);
+  }
+  return nodes;
+}
+
 interface Voice {
   source: AudioBufferSourceNode;
   gain: GainNode;
@@ -121,12 +149,19 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks, strums }: 
       return buffer;
     };
     const active = new Set<Voice>(); // scheduled or sounding
-    const voice = (buffer: AudioBuffer, when: number, level: number, until?: number) => {
+    const voice = (
+      buffer: AudioBuffer,
+      when: number,
+      level: number,
+      until?: number,
+      shape?: (source: AudioBufferSourceNode) => AudioNode[],
+    ) => {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       const gain = ctx.createGain();
       gain.gain.value = level;
       source.connect(gain).connect(ctx.destination);
+      const extra = shape?.(source) ?? [];
       source.start(when);
       if (until !== undefined) {
         gain.gain.setTargetAtTime(0, until, RELEASE);
@@ -137,20 +172,23 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks, strums }: 
       source.onended = () => {
         active.delete(v);
         gain.disconnect();
+        for (const node of extra) node.disconnect();
       };
     };
 
     const events: { time: number; play: (when: number, rate: number) => void }[] = [];
     if (synth) {
-      for (const note of notes) {
+      // One voice per pick: hammer-ons, pull-offs and slides change its pitch.
+      for (const v of synthVoices(notes)) {
         events.push({
-          time: note.start,
+          time: v.start,
           play: (when, rate) =>
             voice(
-              bufferFor(`n${note.pitch}`, () => pluck(ctx, note.pitch)),
+              bufferFor(`n${v.pitch}`, () => pluck(ctx, v.pitch)),
               when,
-              noteLevel(note.velocity),
-              when + Math.max(0.05, (note.end - note.start) / rate),
+              noteLevel(v.velocity),
+              when + Math.max(0.05, (v.end - v.start) / rate),
+              (source) => applyPitch(ctx, source, v, when, rate),
             ),
         });
       }
@@ -257,22 +295,24 @@ export function useNotePlayer({ audio, playing, notes, synth, clicks, strums }: 
  */
 export async function renderNotes(notes: Note[], sampleRate = 44100): Promise<AudioBuffer> {
   const tail = RELEASE * 8;
-  const end = notes.reduce((last, n) => Math.max(last, Math.min(n.start + PLUCK_SECONDS, n.end + tail)), 0);
+  const voices = synthVoices(notes);
+  const end = voices.reduce((last, v) => Math.max(last, Math.min(v.start + PLUCK_SECONDS, v.end + tail)), 0);
   const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil((end + 0.1) * sampleRate)), sampleRate);
   const buffers = new Map<number, AudioBuffer>();
-  for (const note of notes) {
-    let buffer = buffers.get(note.pitch);
+  for (const v of voices) {
+    let buffer = buffers.get(v.pitch);
     if (!buffer) {
-      buffer = pluck(ctx, note.pitch);
-      buffers.set(note.pitch, buffer);
+      buffer = pluck(ctx, v.pitch);
+      buffers.set(v.pitch, buffer);
     }
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gain = ctx.createGain();
-    gain.gain.value = noteLevel(note.velocity);
+    gain.gain.value = noteLevel(v.velocity);
     source.connect(gain).connect(ctx.destination);
-    const until = note.start + Math.max(0.05, note.end - note.start);
-    source.start(note.start);
+    applyPitch(ctx, source, v, v.start, 1);
+    const until = v.start + Math.max(0.05, v.end - v.start);
+    source.start(v.start);
     gain.gain.setTargetAtTime(0, until, RELEASE);
     source.stop(until + tail);
   }

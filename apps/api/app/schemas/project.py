@@ -8,6 +8,7 @@ from app.config import settings
 from app.models.project import ProjectStatus
 from music_core.analysis import KEY_NAMES
 from music_core.guitar_chords import ChordSymbol
+from music_core.notes import MAX_BEND, TECHNIQUES
 from music_core.tab import MAX_CAPO, TUNINGS
 
 MAX_NOTE_SECONDS = 6 * 3600.0  # far beyond max_audio_minutes; bounds MIDI/tab export sizes
@@ -25,6 +26,7 @@ def _known_key(value: str | None) -> str | None:
 
 KeyName = Annotated[str | None, AfterValidator(_known_key)]
 TuningName = Literal[tuple(TUNINGS)]  # type: ignore[valid-type]
+TechniqueName = Literal[tuple(TECHNIQUES)]  # type: ignore[valid-type]
 # What was recorded: a guitar, a voice (sung, hummed or whistled melody) or a whole song.
 SourceName = Literal["guitar", "voice", "song"]
 Tempo = Annotated[float | None, Field(ge=MIN_TEMPO, le=MAX_TEMPO)]
@@ -43,6 +45,9 @@ class NoteSchema(BaseModel):
     string: int | None = Field(default=None, ge=0, lt=MAX_STRINGS)
     fret: int | None = Field(default=None, ge=0, le=MAX_FRET)
     confidence: float | None = Field(default=None, ge=0, le=1)
+    technique: TechniqueName | None = None
+    bend: float | None = Field(default=None, gt=0, le=MAX_BEND)
+    vibrato: bool = False
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "NoteSchema":
