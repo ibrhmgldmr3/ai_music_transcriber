@@ -63,6 +63,10 @@ class TechniqueSettings:
     base_percentile: float = 10.0  # the start's lowest part
     base_tolerance: float = 0.4  # semitones the start may be off a fretted note
     bend_below: int = 2  # semitones below the transcribed pitch a bend may start
+    # ... and above it: a bend already under way as the note is picked, taken as bent
+    # from the note itself (AR+FS bend F 0.75 -> 0.78 on the harmonic sum, 0.53 -> 0.75
+    # on the contour model, whose start has no 46 ms window holding the fretted pitch).
+    bend_above: int = 1
     # Vibrato: a regular swing of at least vibrato_depth semitones peak to peak. Chosen
     # on IDMT's AR and FS guitars (the depth of its vibrato notes: median 0.22). Slower
     # swings than 4 Hz (IDMT's slow vibrato takes, 2-3 Hz) cost more than they found.
@@ -217,7 +221,20 @@ class ContourTracker(PitchTracker):
         probs = predictor.predict_features(compute_features(y, cfg))["contour"]
         labels = cfg["labels"]
         per_semitone = labels["contour"].get("bins_per_semitone", 3)
-        return cls(probs, predictor.frame_rate, labels["min_midi"], per_semitone, s)
+        # The rules were chosen on the harmonic sum's frames (``s.hop_length``); the model
+        # runs at half that rate (hop 512). Resampled, a bend's steps between frames and
+        # the curve's median filter span the same time as on the harmonic sum.
+        rate = cfg["audio"]["sample_rate"] / s.hop_length
+        if len(probs) > 1 and not np.isclose(rate, predictor.frame_rate):
+            t = np.arange(int(len(probs) * rate / predictor.frame_rate)) * (
+                predictor.frame_rate / rate
+            )
+            i = np.minimum(t.astype(int), len(probs) - 2)
+            w = np.minimum(t - i, 1.0)[:, None]
+            probs = (1 - w) * probs[i] + w * probs[i + 1]
+        else:
+            rate = predictor.frame_rate
+        return cls(probs, rate, labels["min_midi"], per_semitone, s)
 
     def track(
         self,
@@ -325,8 +342,11 @@ def find_bend(
     # median of the first 40 ms was already 0.15-0.5 semitones up).
     base = float(np.nanpercentile(early, s.base_percentile))
     fretted = int(round(base))
-    if abs(base - fretted) > s.base_tolerance or not pitch - s.bend_below <= fretted <= pitch:
+    if abs(base - fretted) > s.base_tolerance or not (
+        pitch - s.bend_below <= fretted <= pitch + s.bend_above
+    ):
         return None  # starts away from any fretted note it could be bent from
+    fretted = min(fretted, pitch)
     rise = np.nan_to_num(curve - fretted, nan=-np.inf)
     held = ndimage.minimum_filter1d(rise, hold, mode="nearest")
     amount = float(held.max())

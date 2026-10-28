@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--checkpoint", default="ml/checkpoints/guitar_v10/best.pt")
     parser.add_argument("--tab-checkpoint", default="ml/checkpoints/guitar_v7/best.pt")
     parser.add_argument("--tracker", choices=("harmonic", "contour"), default="harmonic")
-    parser.add_argument("--contour-checkpoint", default="ml/checkpoints/guitar_contour/best.pt")
+    parser.add_argument("--contour-checkpoint", default="ml/checkpoints/guitar_contour5/best.pt")
     parser.add_argument("--set", nargs="*", default=[], metavar="NAME=VALUE")
     args = parser.parse_args(argv)
     s = settings_from(args.set)

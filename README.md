@@ -594,6 +594,22 @@ Aynı küçük denemede (GuitarSet'in 8 kaydı, 40 kısa epoch) oyuncu 05'in sol
 
 Neredeyse hiç eğitilmeden bile vibratoyu tam eğitilmiş 1. turdan iyi izliyor. Veri 1. turla aynı kayıtlar ve varyantlar; zip yaklaşık 4 GB (`guitarset_contour5.zip`). Notebook'ta `ROUND = 2` varsayılan.
 
+**2. turun sonucu: 1. turdan çok iyi, harmonik toplamı hâlâ geçmiyor; uygulama harmonik toplamda kalıyor.** Colab'da en iyi skor 66. epoch'ta (`ml/checkpoints/guitar_contour5/best.pt`: `val_contour_f1` 0.740, artık 0.5 eşiğinde; nota karesi F1 0.886). Ölçerken iki şey değişti:
+
+- Model saniyede 86 kare veriyor (hop 512), kurallar ise harmonik toplamın 172 karesinde seçilmişti. Aynı bend yarı kare hızında kareler arasında iki kat büyük adım atıyor ve "slide gibi tırmanıyor" şartına takılıyor, medyan filtre de iki kat uzun bir süreyi düzlüyor. `ContourTracker.from_audio` modelin çıkışını artık zamanda `hop_length` hızına yeniden örnekliyor (AR+FS bend F 0.44 → 0.53).
+- Kalan bend kayıplarının çoğu (AR+FS'de 41) notanın başının daha çalınırken bükülmüş olmasından geliyor. Harmonik toplamın 46 ms'lik penceresi pena atağındaki basılı perdeyi bir süre tutuyor, kontur modeli tutmuyor: başlangıç notanın bir yarım ton üstüne yuvarlanıyor ve "başlangıç bir perdeye oturmuyor" diye eleniyor. Yeni `bend_above` ayarı başlangıcın notanın bu kadar yarım ton üstünde olmasına izin veriyor, basılı perde o zaman notanın kendisi sayılıyor. (GuitarSet pickup'ına göre iki izleyicinin eğrisi arasında zaman kayması yok, ikisi de en iyi +2–3 karede.)
+
+| | Harmonik toplam | Kontur, 1. tur | Kontur, 2. tur |
+|---|---|---|---|
+| GuitarSet oyuncu 05 sololar: ortanca hata / 25 cent içinde | 3.5 cent / %91.5 | 3.9 cent / %91.8 | 6.4 cent / %94.0 |
+| GuitarSet oyuncu 05: vibrato F (P / R) | 0.57 (0.46 / 0.74) | – | 0.46 (0.35 / 0.69) |
+| IDMT AR+FS, IDMT notalarıyla: bend F, `bend_above` 0 → 1 | 0.75 → 0.78 | – | 0.53 → 0.75 |
+| IDMT AR+FS: vibrato F | 0.65 | – | 0.56 |
+| IDMT LP, IDMT notalarıyla: bend F, `bend_above` 0 → 1 / vibrato F | 0.68 → 0.70 / 0.62 | 0.00 / 0.14 | 0.42 → 0.56 / 0.52 |
+| IDMT LP, modelin notalarıyla: bend F (`bend_above` 1) / vibrato F / slide F | 0.33 / 0.47 / 0.23 | – | 0.35 / 0.45 / 0.05 |
+
+Bend'de, başlangıç kuralı gevşetilince kontur modeli harmonik toplama yaklaşıyor (modelin notalarıyla LP'de biraz önde, ama 17'ye 16 işaret). Vibratoda geride: normal notaların daha çoğunu titreşiyor sayıyor (LP'de %0.8, harmonik toplamda %0.1), eğri sabit bir notada da biraz oynuyor. Slide'da çok geride. `bend_above` varsayılan olarak 1: harmonik toplamda da AR+FS'de ve LP'de bend'i biraz artırıyor, modelin notalarıyla (uygulamanın yaptığı) bir şey değiştirmiyor.
+
 ## Farklı akortlar ve capo
 
 Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.
