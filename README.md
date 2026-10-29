@@ -610,6 +610,27 @@ Neredeyse hiç eğitilmeden bile vibratoyu tam eğitilmiş 1. turdan iyi izliyor
 
 Bend'de, başlangıç kuralı gevşetilince kontur modeli harmonik toplama yaklaşıyor (modelin notalarıyla LP'de biraz önde, ama 17'ye 16 işaret). Vibratoda geride: normal notaların daha çoğunu titreşiyor sayıyor (LP'de %0.8, harmonik toplamda %0.1), eğri sabit bir notada da biraz oynuyor. Slide'da çok geride. `bend_above` varsayılan olarak 1: harmonik toplamda da AR+FS'de ve LP'de bend'i biraz artırıyor, modelin notalarıyla (uygulamanın yaptığı) bir şey değiştirmiyor.
 
+### Modelin notalarında neler kayboluyor
+
+IDMT LP'de, modelin notalarıyla etiketli her tekniğin nereye gittiği (harmonik toplam, `bend_above` 1):
+
+| IDMT LP | Bulunan | Nota var, kural "hayır" | Model nota yazmamış | Model başka perdeden yazmış |
+|---|---|---|---|---|
+| Bend (57) | 12 | 17 | 21 | 6 (bükülmüş perdeden, geri perdelenmemiş) |
+| Slide (37) | 5 | 4 | 9 (ilk nota) | 7 (ilk nota) |
+| Vibrato (54) | 18 | 32 | – | 4 (onset 50 ms'den uzak) |
+
+Kalan 11 slide'ın 8'i tek perdelik kayma: tasarım gereği ölçülmüyor. Diğer 3'ünde iniş notası yok ya da iki nota arasındaki boşluk kuralın dışında.
+
+- **Vibrato'da kayıp nota modelinde değil, kuralda:** notaların %95'i eşleşiyor. Kural, IDMT'nin kendi nota sınırlarıyla bile vibratoların yarısını kaçırıyor. Modelin notaları %20–25 daha kısa; bu da LP'de 6 vibrato daha kaybettiriyor.
+- **Notası hiç yazılmayan bend'lerin hepsi Lick11'den.** Muted çekimlerde (`MN`) bend'ler 0.1–0.15 s süren notalar ve modelin frame olasılığı neredeyse sıfır. Diğer çekimlerde bend legato çalınıyor (önceki notadan pena vurulmadan). Frame olasılığı komşu perdelere dağılıyor (0.2–0.5), onset ise ≈ 0. Decoder onset istediği için nota yazmıyor.
+- **Denenen ve bırakılan: frame olasılığından nota kurtarma.** Notası olmayan yerlerde frame olasılığı ±1 yarım ton toplandı, çalan notalardan ve onların üst harmoniklerinden uzak bölgeler aday nota sayıldı. Bükülünce kesilen notaların uzatılmış hâli de aday oldu.
+  - Adayların hepsi eklenince AR+FS'de nota F1 0.792'den 0.787'ye ve altına düştü. Eklenenlerin çoğu, var olan bir notanın içinde yeniden başlayan kopyalardı.
+  - Yalnızca kuralların bend ya da slide bulduğu adaylar tutulunca bend F AR+FS'de 0.51'den 0.54'e, LP'de 0.33'ten 0.35'e çıktı. Ama LP'de eklenen 6 bend'in 4'ü yanlıştı, GuitarSet oyuncu 05'te (pickup'a göre) eklenen 7 bend'in hepsi yanlıştı (P 0.40 → 0.17).
+  - Uygulamaya alınmadı.
+
+`benchmark_techniques.py --notes model` artık notaları değil modelin olasılıklarını önbelleğe alıyor (`ml/data/interim/techniques/*.npz`). Böylece decoder'daki bir değişiklik modeli yeniden çalıştırmadan ölçülebiliyor; decoder ayarları `--inference onset_threshold=0.4` gibi değiştirilebiliyor.
+
 ## Farklı akortlar ve capo
 
 Yüklerken (ya da editörde yeniden çözümlerken) akort ve capo seçilir. Akortlar: Standart, yarım ton aşağı, bir ton aşağı, Drop D, Drop C, C standart, DADGAD, Open G ve Open D. Capo 0–12 arasında seçilebilir. Perdeler capodan itibaren sayılır. TAB, MusicXML ve ASCII TAB "Capo N" yazar, tel adları akortun kendisini gösterir. Akort ya da capo değişince notalar aynı kalır ama tel ve perdeler değişir. Bu yüzden editör, ayar değişince yeniden çözümlemeyi önerir.

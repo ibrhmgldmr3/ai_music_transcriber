@@ -12,9 +12,11 @@ the hexaphonic pickup. The same rules applied to that reference curve give the l
 so this measures how well the curve is followed in the microphone recording.
 
 Notes: ``--notes reference`` uses the dataset's own notes (bends and vibrato only),
-``--notes model`` a transcription (``--checkpoint``, ``--tab-checkpoint``; cached),
-matched to the reference by pitch and onset (50 ms). ``--set name=value`` overrides a
-``TechniqueSettings`` field.
+``--notes model`` a transcription (``--checkpoint``, ``--tab-checkpoint``; the model's
+probabilities are cached, the decoding is not), matched to the reference by pitch and
+onset (50 ms). ``--set name=value`` overrides a ``TechniqueSettings`` field,
+``--inference name=json`` a decoding setting of the note model (e.g.
+``onset_threshold=0.4``).
 
 ``--tracker contour`` follows the pitch with the contour model (``--contour-checkpoint``,
 ``ml/configs/guitar_contour.yaml``) instead of the harmonic sum. On GuitarSet the report
@@ -119,9 +121,6 @@ def own_note_labels(notes: Sequence[Note], tracker: PitchTracker) -> list[dict]:
 
 
 def transcribe(dataset: str, take: str, y: np.ndarray, args: argparse.Namespace) -> list[Note]:
-    cache = NOTES_CACHE / dataset / f"{take}.json"
-    if cache.exists():
-        return [Note.from_dict(n) for n in json.loads(cache.read_text())]
     from ml.inference.predict import Predictor
     from ml.preprocessing.spectrogram import compute_features
 
@@ -129,11 +128,20 @@ def transcribe(dataset: str, take: str, y: np.ndarray, args: argparse.Namespace)
         transcribe.predictor = Predictor.from_checkpoint(
             args.checkpoint, tab_checkpoint=args.tab_checkpoint
         )
+        inference = transcribe.predictor.cfg["inference"]
+        for item in args.inference:
+            name, _, value = item.partition("=")
+            inference[name] = json.loads(value)
     predictor = transcribe.predictor
-    notes = predictor.decode(predictor.predict_features(compute_features(y, predictor.cfg)))
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps([n.to_dict() for n in notes]))
-    return notes
+    cache = NOTES_CACHE / dataset / f"{take}.npz"
+    if cache.exists():
+        with np.load(cache) as data:
+            probs = dict(data)
+    else:
+        probs = predictor.predict_features(compute_features(y, predictor.cfg))
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(cache, **probs)
+    return predictor.decode(probs)
 
 
 def match(reference: Sequence[Note], estimate: Sequence[Note], tolerance: float = 0.05) -> dict:
@@ -337,6 +345,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--tracker", choices=("harmonic", "contour"), default="harmonic")
     parser.add_argument("--contour-checkpoint", default="ml/checkpoints/guitar_contour5/best.pt")
     parser.add_argument("--set", nargs="*", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--inference", nargs="*", default=[], metavar="NAME=JSON")
     args = parser.parse_args(argv)
     s = settings_from(args.set)
 
