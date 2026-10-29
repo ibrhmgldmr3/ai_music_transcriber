@@ -23,7 +23,7 @@ with labeled hammer-ons and pull-offs is used yet. They can be marked in the edi
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import librosa
 import numpy as np
@@ -63,6 +63,12 @@ class TechniqueSettings:
     base_percentile: float = 10.0  # the start's lowest part
     base_tolerance: float = 0.4  # semitones the start may be off a fretted note
     bend_below: int = 2  # semitones below the transcribed pitch a bend may start
+    # The note model ends a note where the pitch leaves the fretted note's bin, often
+    # before the bend is held (IDMT's licks: a third of the bends it missed). A note
+    # with no bend is read again up to bend_extend seconds further, not past the next
+    # note near its pitch nor in a chord, and is bent if the bend starts within it.
+    # Chosen on IDMT AR+FS (0.1-0.3 within a note of each other).
+    bend_extend: float = 0.2
     # ... and above it: a bend already under way as the note is picked, taken as bent
     # from the note itself (AR+FS bend F 0.75 -> 0.78 on the harmonic sum, 0.53 -> 0.75
     # on the contour model, whose start has no 46 ms window holding the fretted pitch).
@@ -317,6 +323,7 @@ def _smooth(midi: np.ndarray, width: int = 5) -> np.ndarray:
 class Bend:
     fretted: int  # the note the string is fretted at
     amount: float  # semitones it is bent up (rounded to a half)
+    rise: int = field(default=0, compare=False)  # curve frame where the bend starts
 
 
 def find_bend(
@@ -366,7 +373,7 @@ def find_bend(
     steps = np.abs(np.diff(curve[start : end + 1]))
     if len(steps) and np.nanmax(steps, initial=0.0) > s.bend_step * amount:
         return None  # climbs fret by fret: a slide
-    return Bend(fretted, round(amount * 2) / 2)
+    return Bend(fretted, round(amount * 2) / 2, start)
 
 
 def has_vibrato(
@@ -485,9 +492,32 @@ def detect_techniques(
         if moved is not None:
             result[j], result[i] = moved[0], replace(moved[1], technique="slide")
 
+    starts = sorted(n.start for n in notes)
     for i in order:
         note, curve = result[i], curves[i]
         bend = find_bend(curve, note.pitch, tracker.frame_rate, s)
+        if (
+            bend is None
+            and s.bend_extend > 0
+            and not _in_chord(note.start, starts, s.chord_tolerance)
+        ):
+            later = [
+                n.start
+                for n in notes
+                if n.start > note.start + 0.02 and -s.below <= n.pitch - note.pitch <= s.above
+            ]
+            end = min([note.end + s.bend_extend, *later])
+            if end > note.end + 1 / tracker.frame_rate:
+                longer = replace(notes[i], end=end)
+                others = [
+                    n for n in notes if n is not notes[i] and n.end > note.start and n.start < end
+                ]
+                held = tracker.note_curve(longer, others).midi - shift
+                bend = find_bend(held, note.pitch, tracker.frame_rate, s)
+                if bend is not None and bend.rise >= len(curve):
+                    bend = None  # the pitch only moves after the note ended
+                if bend is not None:
+                    note, curve = replace(note, end=end), held
         if bend is not None and bend.fretted != note.pitch:
             note = _refret(note, bend.fretted)
             bend = bend if note.pitch == bend.fretted else None

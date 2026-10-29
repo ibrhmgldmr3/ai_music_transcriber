@@ -529,7 +529,7 @@ Veri: Zenodo'daki `IDMT-SMT-GUITAR_V2.zip` (1.3 GB) `ml/data/raw/idmt` altına a
 | IDMT, LP gitarı | Bend P / R | Vibrato P / R | Slide P / R |
 |---|---|---|---|
 | IDMT'nin notalarıyla | 0.87 / 0.56 | 0.87 / 0.48 | (notalar ayrı değil) |
-| **Modelin notalarıyla** | **0.75 / 0.21** | **0.82 / 0.33** | **0.83 / 0.14** |
+| **Modelin notalarıyla** | **0.78 / 0.25** | **0.82 / 0.33** | **0.83 / 0.14** |
 
 Slide'da ilk kurallar (aynı tel, 120 ms'ye kadar boşluk) AR+FS'de 0.16 kesinlik veriyordu; boşluk ve süre şartlarıyla 0.85. Normal notaların hemen hiçbiri işaretlenmiyor (bend %0, vibrato %0.1). İşaretlenenler çoğunlukla doğru, ama bend, vibrato ve slide'ların çoğu kaçıyor. Kaçırmanın büyük kısmı nota modelinden geliyor: IDMT'nin bend'lerinin dörtte birinin yakınında model hiç nota yazmıyor, AR+FS'de slide'ların üçte ikisinde model, kuralın bakabileceği iki ayrı nota üretmiyor. IDMT tek çalgıcı ve tek kayıt düzeni; LP testi ancak gitar farkını sınıyor.
 
@@ -612,7 +612,7 @@ Bend'de, başlangıç kuralı gevşetilince kontur modeli harmonik toplama yakla
 
 ### Modelin notalarında neler kayboluyor
 
-IDMT LP'de, modelin notalarıyla etiketli her tekniğin nereye gittiği (harmonik toplam, `bend_above` 1):
+IDMT LP'de, modelin notalarıyla etiketli her tekniğin nereye gittiği (harmonik toplam, `bend_above` 1, aşağıdaki `bend_extend` öncesi):
 
 | IDMT LP | Bulunan | Nota var, kural "hayır" | Model nota yazmamış | Model başka perdeden yazmış |
 |---|---|---|---|---|
@@ -628,6 +628,19 @@ Kalan 11 slide'ın 8'i tek perdelik kayma: tasarım gereği ölçülmüyor. Diğ
   - Adayların hepsi eklenince AR+FS'de nota F1 0.792'den 0.787'ye ve altına düştü. Eklenenlerin çoğu, var olan bir notanın içinde yeniden başlayan kopyalardı.
   - Yalnızca kuralların bend ya da slide bulduğu adaylar tutulunca bend F AR+FS'de 0.51'den 0.54'e, LP'de 0.33'ten 0.35'e çıktı. Ama LP'de eklenen 6 bend'in 4'ü yanlıştı, GuitarSet oyuncu 05'te (pickup'a göre) eklenen 7 bend'in hepsi yanlıştı (P 0.40 → 0.17).
   - Uygulamaya alınmadı.
+- **Kesilen notayı ileri okumak (`bend_extend`, uygulamada).** Model, perde basılan notanın bininden ayrılınca notayı bitiriyor; çoğu zaman bend tutulmadan önce. "Nota var, kural hayır diyor" grubunun ve bükülmüş perdeden yazılan notaların çoğunda kural, eğri çok kısa olduğu için ya da bend'in tepesini görmediği için bend bulamıyordu.
+  - Bend'i olmayan bir nota, en çok 0.2 s ileriye kadar yeniden okunuyor. Perdesine yakın bir sonraki notayı geçmiyor, akorlarda denenmiyor. Bend notanın içinde başlamışsa nota bend sayılıyor ve bitişi uzatılıyor.
+  - "Bend nota bittikten sonra başlıyorsa sayma" şartı olmadan GuitarSet'in akor kayıtlarında yanlış bend'ler çıkıyordu.
+  - 0.1, 0.2 ve 0.3 s, AR+FS'de birbirinden en çok bir nota farklı.
+
+| Modelin notalarıyla, bend | Önce | `bend_extend` 0.2 |
+|---|---|---|
+| IDMT AR+FS (ayar): P / R / F | 0.89 / 0.36 / 0.51 | 0.91 / 0.46 / **0.62** |
+| IDMT LP (test): P / R / F | 0.75 / 0.21 / 0.33 | 0.78 / 0.25 / **0.37** |
+| GuitarSet oyuncu 05, solo + akor: işaretlenen / pickup'ta da bend | 5 / 2 | 5 / 2 |
+| GuitarSet oyuncu 00–04, sololar: işaretlenen / pickup'ta da bend | 17 / 3 | 28 / 4 |
+
+Vibrato ve slide değişmiyor, IDMT'nin normal notalarında yeni bend yok. GuitarSet sololarında eklenen 11 bend'in 10'u, aynı pencerede pickup eğrisinde bend değil. Bunlar çoğunlukla notanın sonunda parmak kalkarken perdenin kısa bir sıçraması ve ardından gelen çınlama (13 858 eşleşen notada %0.08). Ses gücü, bend miktarı ve zamanlama bunları gerçek bend'lerden ayırmadı.
 
 `benchmark_techniques.py --notes model` artık notaları değil modelin olasılıklarını önbelleğe alıyor (`ml/data/interim/techniques/*.npz`). Böylece decoder'daki bir değişiklik modeli yeniden çalıştırmadan ölçülebiliyor; decoder ayarları `--inference onset_threshold=0.4` gibi değiştirilebiliyor.
 

@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from ml.inference.techniques import Bend, PitchTracker, detect_techniques, find_bend, has_vibrato
+from ml.inference.techniques import (
+    Bend,
+    PitchTracker,
+    TechniqueSettings,
+    detect_techniques,
+    find_bend,
+    has_vibrato,
+)
 from music_core.notes import Note
 
 SR = 44100
@@ -101,3 +108,22 @@ def test_a_note_named_after_its_bend_is_set_back_to_the_fretted_note():
     y = tone(curve((0.05, 64, 64), (0.05, 64, 65), (0.5, 65, 65)))
     (note,) = detect_techniques([Note(65, 0.0, 0.6, string=4, fret=6)], y, SR)
     assert (note.pitch, note.fret, note.bend) == (64, 5, 1.0)
+
+
+def test_a_note_cut_where_the_bend_starts_is_read_on():
+    # The note model ends the E4 where its pitch leaves E (0.17 s), before the bend is
+    # held; the string still sounds bent after that.
+    y = tone(curve((0.12, 64, 64), (0.08, 64, 66), (0.3, 66, 66)))
+    cut = Note(64, 0.0, 0.17, string=4, fret=5)
+    (note,) = detect_techniques([cut], y, SR, TechniqueSettings(bend_extend=0.0))
+    assert note.bend is None
+    (note,) = detect_techniques([cut], y, SR)
+    assert (note.pitch, note.bend) == (64, 2.0)
+    assert note.end == pytest.approx(0.37)
+
+
+def test_a_note_is_not_read_into_the_next_one():
+    # A picked D4 -> E4: the E4 isn't the D4's bend.
+    y = np.concatenate([tone(curve((0.15, 62, 62))), tone(curve((0.3, 64, 64)))])
+    notes = [Note(62, 0.0, 0.12, string=3, fret=0), Note(64, 0.15, 0.45, string=4, fret=5)]
+    assert [n.bend for n in detect_techniques(notes, y, SR)] == [None, None]
