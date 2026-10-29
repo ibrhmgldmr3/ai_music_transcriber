@@ -77,6 +77,16 @@ def num_pitches(cfg: dict[str, Any]) -> int:
     return labels["max_midi"] - labels["min_midi"] + 1
 
 
+def contour_bins(cfg: dict[str, Any]) -> int | None:
+    """Bins of the contour head (``labels.contour``), or None for models without one."""
+    labels = cfg["labels"]
+    contour = labels.get("contour")
+    if not contour:
+        return None
+    per_semitone = int(contour.get("bins_per_semitone", 3))
+    return (labels["max_midi"] - labels["min_midi"]) * per_semitone + 1
+
+
 def tab_shape(cfg: dict[str, Any]) -> tuple[int, int]:
     """(number of strings, classes per string). Class 0 = silent, class k = fret k - 1."""
     tab = cfg.get("tab") or {}

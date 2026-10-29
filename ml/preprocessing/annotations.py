@@ -223,6 +223,47 @@ def notes_to_targets(
     return {"onset": onset, "frame": frame, "offset": offset, "tab": tab}
 
 
+def contour_bins(min_midi: int, max_midi: int, bins_per_semitone: int = 3) -> int:
+    """Rows of the contour target: bin k is MIDI ``min_midi + k / bins_per_semitone``."""
+    return (max_midi - min_midi) * bins_per_semitone + 1
+
+
+def contours_to_targets(
+    contours: dict[int, tuple[np.ndarray, np.ndarray]],
+    n_frames: int,
+    sample_rate: int,
+    hop_length: int,
+    min_midi: int,
+    max_midi: int,
+    bins_per_semitone: int = 3,
+    sigma: float = 1.0,
+) -> np.ndarray:
+    """Soft pitch-contour target ``(n_frames, bins)`` from per-string (times, MIDI) curves.
+
+    Every voiced contour point marks its fractional pitch with a Gaussian ``sigma`` bins
+    wide (cut at 3 sigma), as Basic Pitch does; a frame keeps the maximum over the points
+    and strings that fall in it. Unvoiced (NaN) points leave the frame empty.
+    """
+    n_bins = contour_bins(min_midi, max_midi, bins_per_semitone)
+    target = np.zeros((n_frames, n_bins), dtype=np.float32)
+    fps = sample_rate / hop_length
+    radius = int(np.ceil(3 * sigma))
+    offsets = np.arange(-radius, radius + 1)
+    for times, pitches in contours.values():
+        voiced = np.isfinite(pitches)
+        frames = np.round(np.asarray(times)[voiced] * fps).astype(int)
+        position = (np.asarray(pitches)[voiced] - min_midi) * bins_per_semitone
+        keep = (frames >= 0) & (frames < n_frames)
+        keep &= (position > -radius) & (position < n_bins - 1 + radius)
+        frames, position = frames[keep], position[keep]
+        cols = np.round(position).astype(int)[:, None] + offsets[None, :]
+        values = np.exp(-0.5 * ((cols - position[:, None]) / sigma) ** 2)
+        rows = np.broadcast_to(frames[:, None], cols.shape)
+        inside = (cols >= 0) & (cols < n_bins)
+        np.maximum.at(target, (rows[inside], cols[inside]), values[inside])
+    return target.astype(np.float16)
+
+
 def notes_to_array(notes: Sequence[Note]) -> np.ndarray:
     """Pack notes into a float array ``(N, 6)`` (see ``NOTE_ARRAY_COLUMNS``); None -> -1."""
     rows = [

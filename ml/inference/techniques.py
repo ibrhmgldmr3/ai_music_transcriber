@@ -23,7 +23,7 @@ with labeled hammer-ons and pull-offs is used yet. They can be marked in the edi
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import librosa
 import numpy as np
@@ -46,6 +46,7 @@ class TechniqueSettings:
     attack: float = 0.015  # seconds skipped at a note's start (the pick's noise)
     release: float = 0.01  # and at its end
     weak: float = 0.2  # frames with less harmonic energy than this x the note's median
+    contour_weak: float = 0.1  # ContourTracker: frames whose best pitch is less likely
     # Bends: the pitch held at least bend_min semitones above the fretted pitch for
     # bend_hold seconds, reached in at least bend_rise seconds (15 % -> 85 %) without a
     # step of more than bend_step of the bend between two frames. Chosen on IDMT-SMT-
@@ -62,6 +63,16 @@ class TechniqueSettings:
     base_percentile: float = 10.0  # the start's lowest part
     base_tolerance: float = 0.4  # semitones the start may be off a fretted note
     bend_below: int = 2  # semitones below the transcribed pitch a bend may start
+    # The note model ends a note where the pitch leaves the fretted note's bin, often
+    # before the bend is held (IDMT's licks: a third of the bends it missed). A note
+    # with no bend is read again up to bend_extend seconds further, not past the next
+    # note near its pitch nor in a chord, and is bent if the bend starts within it.
+    # Chosen on IDMT AR+FS (0.1-0.3 within a note of each other).
+    bend_extend: float = 0.2
+    # ... and above it: a bend already under way as the note is picked, taken as bent
+    # from the note itself (AR+FS bend F 0.75 -> 0.78 on the harmonic sum, 0.53 -> 0.75
+    # on the contour model, whose start has no 46 ms window holding the fretted pitch).
+    bend_above: int = 1
     # Vibrato: a regular swing of at least vibrato_depth semitones peak to peak. Chosen
     # on IDMT's AR and FS guitars (the depth of its vibrato notes: median 0.22). Slower
     # swings than 4 Hz (IDMT's slow vibrato takes, 2-3 Hz) cost more than they found.
@@ -85,9 +96,6 @@ class TechniqueSettings:
     # and the second's start.
     slide_window: tuple[float, float] = (0.08, 0.05)
     slide_max: int = 12  # semitones
-    # Seconds searched before the earlier and after the later of the first note's end
-    # and the second's start.
-    slide_window: tuple[float, float] = (0.08, 0.05)
     chord_tolerance: float = 0.05  # notes starting together form a chord: no slide
 
 
@@ -183,6 +191,91 @@ class PitchTracker:
         )
 
 
+class ContourTracker(PitchTracker):
+    """Pitch following on a contour model's output (``ml/configs/guitar_contour.yaml``).
+
+    The model gives, frame by frame, how likely each pitch is at a third of a semitone,
+    learned from GuitarSet's hexaphonic pickup. A note's curve is read from it like the
+    harmonic sum is: candidates around the note, other notes masked, the same continuous
+    path; a parabola through the log-probabilities refines each frame between bins (the
+    training targets are Gaussians, whose log is a parabola).
+    """
+
+    def __init__(
+        self,
+        probs: np.ndarray,
+        frame_rate: float,
+        min_midi: int,
+        bins_per_semitone: int = 3,
+        s: TechniqueSettings = TechniqueSettings(),
+    ):
+        self.s = s
+        self.frame_rate = frame_rate
+        self.probs = np.asarray(probs, dtype=np.float32)  # (frames, bins)
+        self.pitches = min_midi + np.arange(self.probs.shape[1]) / bins_per_semitone
+        self.bin = 1.0 / bins_per_semitone
+        self.offset = 0.0
+
+    @classmethod
+    def from_audio(
+        cls, y: np.ndarray, predictor, s: TechniqueSettings = TechniqueSettings()
+    ) -> ContourTracker:
+        """Run a contour model (a ``Predictor`` with a ``contour`` head) on ``y``."""
+        from ml.preprocessing.spectrogram import compute_features
+
+        cfg = predictor.cfg
+        probs = predictor.predict_features(compute_features(y, cfg))["contour"]
+        labels = cfg["labels"]
+        per_semitone = labels["contour"].get("bins_per_semitone", 3)
+        # The rules were chosen on the harmonic sum's frames (``s.hop_length``); the model
+        # runs at half that rate (hop 512). Resampled, a bend's steps between frames and
+        # the curve's median filter span the same time as on the harmonic sum.
+        rate = cfg["audio"]["sample_rate"] / s.hop_length
+        if len(probs) > 1 and not np.isclose(rate, predictor.frame_rate):
+            t = np.arange(int(len(probs) * rate / predictor.frame_rate)) * (
+                predictor.frame_rate / rate
+            )
+            i = np.minimum(t.astype(int), len(probs) - 2)
+            w = np.minimum(t - i, 1.0)[:, None]
+            probs = (1 - w) * probs[i] + w * probs[i + 1]
+        else:
+            rate = predictor.frame_rate
+        return cls(probs, rate, labels["min_midi"], per_semitone, s)
+
+    def track(
+        self,
+        f0: int,
+        f1: int,
+        low: float,
+        high: float,
+        others: Sequence[Note] = (),
+    ) -> PitchCurve:
+        s = self.s
+        f0, f1 = max(0, f0), min(self.probs.shape[0], f1)
+        pitches = self.pitches - self.offset  # on the guitar's own tuning
+        inside = np.flatnonzero((pitches >= low - 1e-9) & (pitches <= high + 1e-9))
+        if f1 <= f0 or len(inside) < 3:
+            return PitchCurve(f0, np.zeros(0))
+        candidates = pitches[inside]
+        score = self.probs[f0:f1, inside].T.copy()  # (C, T)
+        for other in others:
+            a, b = max(self.frame(other.start), f0), min(self.frame(other.end), f1)
+            if b > a:
+                masked = np.abs(candidates - other.pitch) <= s.mask_width
+                score[masked, a - f0 : b - f0] = 0.0
+
+        cols = np.arange(score.shape[1])
+        k = np.clip(_continuous_path(score, candidates, s.jump), 1, len(candidates) - 2)
+        y0, y1, y2 = (np.log(np.maximum(score[k + d, cols], 1e-4)) for d in (-1, 0, 1))
+        curvature = y0 - 2 * y1 + y2
+        shift = np.divide(
+            0.5 * (y0 - y2), curvature, out=np.zeros_like(y1), where=curvature < -1e-6
+        )
+        midi = candidates[k] + np.clip(shift, -0.5, 0.5) * self.bin
+        midi[score[k, cols] < s.contour_weak] = np.nan
+        return PitchCurve(f0, midi)
+
+
 def _continuous_path(score: np.ndarray, candidates: np.ndarray, jump: float) -> np.ndarray:
     """Candidate index per frame along the strongest path that rarely changes pitch.
 
@@ -230,6 +323,7 @@ def _smooth(midi: np.ndarray, width: int = 5) -> np.ndarray:
 class Bend:
     fretted: int  # the note the string is fretted at
     amount: float  # semitones it is bent up (rounded to a half)
+    rise: int = field(default=0, compare=False)  # curve frame where the bend starts
 
 
 def find_bend(
@@ -255,8 +349,11 @@ def find_bend(
     # median of the first 40 ms was already 0.15-0.5 semitones up).
     base = float(np.nanpercentile(early, s.base_percentile))
     fretted = int(round(base))
-    if abs(base - fretted) > s.base_tolerance or not pitch - s.bend_below <= fretted <= pitch:
+    if abs(base - fretted) > s.base_tolerance or not (
+        pitch - s.bend_below <= fretted <= pitch + s.bend_above
+    ):
         return None  # starts away from any fretted note it could be bent from
+    fretted = min(fretted, pitch)
     rise = np.nan_to_num(curve - fretted, nan=-np.inf)
     held = ndimage.minimum_filter1d(rise, hold, mode="nearest")
     amount = float(held.max())
@@ -276,7 +373,7 @@ def find_bend(
     steps = np.abs(np.diff(curve[start : end + 1]))
     if len(steps) and np.nanmax(steps, initial=0.0) > s.bend_step * amount:
         return None  # climbs fret by fret: a slide
-    return Bend(fretted, round(amount * 2) / 2)
+    return Bend(fretted, round(amount * 2) / 2, start)
 
 
 def has_vibrato(
@@ -350,8 +447,12 @@ def detect_techniques(
     s: TechniqueSettings = TechniqueSettings(),
     tuning: Sequence[int] | None = None,
     num_frets: int = DEFAULT_NUM_FRETS,
+    tracker: PitchTracker | None = None,
 ) -> list[Note]:
     """Mark slides, bends and vibrato on positioned notes (input order is kept).
+
+    The pitch curves come from ``tracker`` (e.g. a ``ContourTracker``), by default a
+    harmonic-sum ``PitchTracker`` on ``y``.
 
     A slide is played on one string, but the fingering optimizer, not knowing it, often
     put its two notes on two (4 in 10 of the slides found on IDMT): they are moved onto
@@ -359,7 +460,7 @@ def detect_techniques(
     named after its bent pitch is set back to the fretted note. ``tuning`` (open
     strings, capo included) is otherwise read from the notes' positions.
     """
-    tracker = PitchTracker(y, sample_rate, s)
+    tracker = tracker or PitchTracker(y, sample_rate, s)
     order = sorted(range(len(notes)), key=lambda i: (notes[i].start, notes[i].pitch))
     result = [replace(n, technique=None, bend=None, vibrato=False) for n in notes]
     curves = []
@@ -391,9 +492,32 @@ def detect_techniques(
         if moved is not None:
             result[j], result[i] = moved[0], replace(moved[1], technique="slide")
 
+    starts = sorted(n.start for n in notes)
     for i in order:
         note, curve = result[i], curves[i]
         bend = find_bend(curve, note.pitch, tracker.frame_rate, s)
+        if (
+            bend is None
+            and s.bend_extend > 0
+            and not _in_chord(note.start, starts, s.chord_tolerance)
+        ):
+            later = [
+                n.start
+                for n in notes
+                if n.start > note.start + 0.02 and -s.below <= n.pitch - note.pitch <= s.above
+            ]
+            end = min([note.end + s.bend_extend, *later])
+            if end > note.end + 1 / tracker.frame_rate:
+                longer = replace(notes[i], end=end)
+                others = [
+                    n for n in notes if n is not notes[i] and n.end > note.start and n.start < end
+                ]
+                held = tracker.note_curve(longer, others).midi - shift
+                bend = find_bend(held, note.pitch, tracker.frame_rate, s)
+                if bend is not None and bend.rise >= len(curve):
+                    bend = None  # the pitch only moves after the note ended
+                if bend is not None:
+                    note, curve = replace(note, end=end), held
         if bend is not None and bend.fretted != note.pitch:
             note = _refret(note, bend.fretted)
             bend = bend if note.pitch == bend.fretted else None

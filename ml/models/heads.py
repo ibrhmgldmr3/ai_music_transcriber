@@ -9,6 +9,9 @@ from torch import nn
 
 # Heads producing per-frame, per-pitch logits (B, T, pitches).
 PITCH_HEADS = ("onset", "frame", "offset")
+# Per-frame pitch contour at a finer resolution (B, T, contour bins), several bins per
+# semitone (``labels.contour``): bends, vibrato and slides show up as moving activations.
+CONTOUR_HEAD = "contour"
 
 
 class PitchHead(nn.Module):
@@ -46,6 +49,7 @@ def build_heads(
     num_strings: int,
     num_classes: int,
     dropout: float = 0.0,
+    n_contour_bins: int | None = None,
 ) -> nn.ModuleDict:
     heads: dict[str, nn.Module] = {}
     for name in names:
@@ -53,8 +57,13 @@ def build_heads(
             heads[name] = PitchHead(in_dim, n_pitches, dropout)
         elif name == "tab":
             heads[name] = TabHead(in_dim, num_strings, num_classes, dropout)
+        elif name == CONTOUR_HEAD:
+            if not n_contour_bins:
+                raise ValueError("The 'contour' head needs labels.contour in the config")
+            heads[name] = PitchHead(in_dim, n_contour_bins, dropout)
         else:
-            raise ValueError(f"Unknown head {name!r}; choose from {PITCH_HEADS + ('tab',)}")
+            choices = PITCH_HEADS + ("tab", CONTOUR_HEAD)
+            raise ValueError(f"Unknown head {name!r}; choose from {choices}")
     if "frame" not in heads:
         raise ValueError("The 'frame' head is required for note decoding")
     return nn.ModuleDict(heads)

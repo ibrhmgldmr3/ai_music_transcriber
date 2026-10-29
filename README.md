@@ -62,7 +62,7 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 |---|---|
 | `apps/web` | Next.js arayüzü: yükleme, proje listesi, editör, ayarlar |
 | `apps/api` | FastAPI + SQLAlchemy + Celery (transkripsiyon işleri) |
-| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle), `guitar_mixed_low.yaml` (C2'ye inen nota aralığı) |
+| `ml/configs` | `base.yaml` (ortak), `guitar.yaml` (GuitarSet), `guitar_tab.yaml` (tab kafası), `guitar_mixed.yaml` / `guitar_tab_mixed.yaml` (ek veri setleriyle), `guitar_mixed_low.yaml` (C2'ye inen nota aralığı), `guitar_contour.yaml` (perde eğrisi kafası) |
 | `ml/preprocessing` | ses yükleme, log-mel/CQT, JAMS ve tel başına MIDI anotasyonları, augmentation |
 | `ml/datasets` | GuitarSet, EGDB (sese hizalanmış etiketleriyle) ve Guitar-TECHS keşfi ve split'leri, PyTorch dataset; ölçümler için AAM (`aam.py`) ve GuitarSet vuruşları (`strums.py`) |
 | `ml/models` | `ConvStack`, `CNN`, `CRNN` (BiLSTM/GRU), çıkış kafaları; akor tanıyıcı BTC (`btc.py`, yalnızca çıkarım) |
@@ -72,6 +72,7 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 | `packages/music-core` | `Note`, MIDI, MusicXML, vuruş ızgarası (`timing.py`), tab optimizasyonu, ton/ölçü/akor analizi ve ton değişimleri (`analysis.py`), ritim kalıbı (`rhythm.py`), gitar akor şemaları, slash akorlar ve capo önerisi (`guitar_chords.py`); `music_core` olarak import edilir |
 | `packages/shared-types` | API şemalarının TypeScript karşılıkları |
 | `scripts` | veri indirme/hazırlama, eğitim, değerlendirme |
+| `notebooks` | Colab'da eğitim (perde eğrisi modeli) |
 
 ## Kurulum
 
@@ -528,7 +529,7 @@ Veri: Zenodo'daki `IDMT-SMT-GUITAR_V2.zip` (1.3 GB) `ml/data/raw/idmt` altına a
 | IDMT, LP gitarı | Bend P / R | Vibrato P / R | Slide P / R |
 |---|---|---|---|
 | IDMT'nin notalarıyla | 0.87 / 0.56 | 0.87 / 0.48 | (notalar ayrı değil) |
-| **Modelin notalarıyla** | **0.75 / 0.21** | **0.82 / 0.33** | **0.83 / 0.14** |
+| **Modelin notalarıyla** | **0.78 / 0.25** | **0.82 / 0.33** | **0.83 / 0.14** |
 
 Slide'da ilk kurallar (aynı tel, 120 ms'ye kadar boşluk) AR+FS'de 0.16 kesinlik veriyordu; boşluk ve süre şartlarıyla 0.85. Normal notaların hemen hiçbiri işaretlenmiyor (bend %0, vibrato %0.1). İşaretlenenler çoğunlukla doğru, ama bend, vibrato ve slide'ların çoğu kaçıyor. Kaçırmanın büyük kısmı nota modelinden geliyor: IDMT'nin bend'lerinin dörtte birinin yakınında model hiç nota yazmıyor, AR+FS'de slide'ların üçte ikisinde model, kuralın bakabileceği iki ayrı nota üretmiyor. IDMT tek çalgıcı ve tek kayıt düzeni; LP testi ancak gitar farkını sınıyor.
 
@@ -549,6 +550,99 @@ Teknikler TAB'da (editör ve ASCII) ve MusicXML'de (her iki dizekte `hammer-on`/
 - **Sentez:** hammer-on, pull-off ve slide yeni bir pena sesi başlatmıyor; aynı telde çalan ses perdesini değiştiriyor (sıçrayarak ya da kayarak). Bend ve vibrato da aynı biçimlerle sesin perdesinde. Bu biçimler Python ile TypeScript'te ortak fixture'la eşit tutuluyor.
 
 Editörün nota panelinden her notanın tekniği, bend miktarı ve vibratosu değiştirilebiliyor.
+
+### Perde eğrisi modeli (Colab'da eğitim)
+
+Kuralların kaçırdıklarının çoğu nota modelinden geliyor: bend'li ve slide'lı geçişleri ayrı notalara bölmüyor. Sıradaki adım, perdeyi yarım ton yerine yarım tonun üçte biri (33 cent) çözünürlükle izleyen bir **kontur kafası** (Basic Pitch'teki gibi). Bend, vibrato ve slide bu çıkışta hareket eden bir aktivasyon olarak görünür; teknikler elle yazılmış harmonik toplamı izleyicisi yerine buradan okunabilir.
+
+- **Hedef:** GuitarSet'in heksafonik pickup'tan çıkan `pitch_contour` anotasyonları (her tel, 5.8 ms'de bir). Her nokta kendi kesirli perdesine 1 bin genişliğinde bir Gauss olarak işleniyor, 157 bin (C2–E6). Teller aynı karede birleşiyor. Perde kaydırma ve tempo değişimi augmentation'larında eğri de kayıyor (`variant_contours`).
+- **Model** (`ml/configs/guitar_contour.yaml`): aynı CNN + BiLSTM, girişi 36 bin/oktav CQT ve iki kat kare hızı (hop 512, ~86 kare/s; 9 Hz'lik vibratoyu izlemeye yetiyor). Son conv bloğu frekansı küçültmüyor (`freq_pools: [2, 2, 1]`). Kontur kafasının yanında nota kafaları da eğitiliyor. Kontur yalnızca GuitarSet'te var, model yalnızca onunla eğitiliyor; doğrulamada izlenen skor `val_contour_f1`.
+- **Veri:** 360 kayıt ve eğitim oyuncularının 240 kaydı için 7 varyant (`ps+1`, `ps-2`, `tempo0.9`, `noise`, `overdrive`, `room`, `codec`).
+
+Veri bu bilgisayarda hazırlanıyor, eğitim ücretsiz Colab'daki T4'te ([`notebooks/train_contour_colab.ipynb`](notebooks/train_contour_colab.ipynb)):
+
+```bash
+python scripts/prepare_dataset.py --config ml/configs/guitar_contour.yaml --augment \
+    --variants ps+1 ps-2 tempo0.9 noise overdrive room codec
+python scripts/pack_dataset.py --config ml/configs/guitar_contour.yaml   # -> guitarset_contour.zip
+```
+
+`guitarset_contour.zip` Drive'da `MyDrive/music_transcriber/` altına yükleniyor, notebook baştan sona çalıştırılıyor. Checkpoint'ler her epoch Drive'a yazıldığı için oturum koparsa notebook yeniden çalıştırılınca eğitim `last.pt`'den devam ediyor. En iyi skor (`best.pt`), erken durdurma sayacı ve `history.csv` de devam eden çalıştırmada korunuyor.
+
+**İlk sonuç: kurallara henüz yetmiyor, uygulama harmonik toplamda kalıyor.** Model 80 epoch'luk eğitimin 76.'sında en iyi skora ulaştı (doğrulama oyuncusu 04: `val_contour_f1` 0.779, nota karesi F1 0.887). `ContourTracker` (`ml/inference/techniques.py`) modelin çıkışından notanın eğrisini harmonik toplamla aynı yolla okuyor (aday perdeler, diğer notaların maskelenmesi, sürekli yol; binler arası için log-olasılıkta parabol). `scripts/benchmark_techniques.py --tracker contour` ikisini karşılaştırıyor:
+
+| | Harmonik toplam | Kontur modeli |
+|---|---|---|
+| GuitarSet oyuncu 05 sololar, pickup'a göre ortanca hata / 25 cent içinde | 3.5 cent / %91.5 | 3.9 cent / %91.8 |
+| Vibrato derinliği (tepe-tepe, pickup'ta vibratolu notalar, pickup 0.34) | 0.28 yarım ton | 0.08 yarım ton |
+| IDMT LP, IDMT notalarıyla: bend F / vibrato F | 0.68 / 0.62 | 0.00 / 0.14 |
+| IDMT AR+FS, kurallar gevşetilince: bend F / vibrato F | 0.75 / 0.65 | 0.30 / 0.49 |
+
+Ortanca hata iyi görünüyor, çünkü karelerin çoğunda perde sabit. Ama eğri binler arasında akmıyor, bin bin basamak atlıyor: bir bin 33 cent, tipik bir vibrato ±17 cent, yani salınım çıkışı bir bin bile oynatmıyor. Bend'de ise basamaklar "slide gibi tırmanıyor" şartına takılıyor. Bundan da çok, notanın başı (pena atağı) boş ya da yukarıda çıkıyor: IDMT LP'nin 57 bend'inin 28'i "başlangıç bir perdeye oturmuyor" diye eleniyor. Temiz Gauss bir çıkışta `ContourTracker` binler arasındaki bend'i birkaç cent içinde izliyor (`tests/test_contour.py`); sorun okumada değil, modelin çıkışının biçiminde. Kafa, frekansı 512 boyutlu tek bir vektöre sıkıştıran katmandan sonra geliyor; Basic Pitch'te olduğu gibi frekans ekseni boyunca konvolüsyonla çalışan bir kontur kafası ve daha ince binler (yarım ton başına 5, 20 cent) sıradaki eğitim turunun adayları.
+
+**2. tur** (`ml/configs/guitar_contour5.yaml`, `ml/models/contour.py`): kontur kafası artık gömme vektörünü değil spektrogramın kendisini okuyor ve frekans eksenini sonuna kadar koruyor. CQT oktav başına 60 bin (yarım ton başına 5, çıkışın çözünürlüğü), harmonik yığını (Basic Pitch gibi: spektrum 0.5, 1, 2, 3, 4, 5. harmoniğin aralığı kadar kaydırılıp kanal olarak üst üste konuyor, böylece bir temel frekansın bininde harmonikleri hizalanıyor), iki 5x5 konvolüsyon, frekansta 13 yarım tonluk geniş bir konvolüsyon ve 5x5 bir çıkış. Her çıkış bini kendi perdesinde hesaplanıyor, binler arasında kayan bir perde aktivasyonu da kaydırıyor. 261 bin (C2–E6). Nota kafaları CRNN yolunda kalıyor. Kafa 35 bin parametre; 16'lık batch 4060'ta 0.95 s, 5.6 GB.
+
+Bu kafa perdeyi doğru bine koyuyor ama emin olmadan: küçük bir denemede karelerin %80'inde en güçlü bin hedefteydi, olasılıklar ise 0.5'in altında kaldı. 0.5 eşikli doğrulama skoru bu yüzden sıfırdı; `best.pt` ilk epoch'ta kalır, eğitim erken dururdu. `val_contour_f1` artık 0.1–0.5 eşiklerinden en iyisinde ölçülüyor (`val_contour_threshold`). Eğri izleyici en güçlü yolu izlediği için bu güvensizlik eğriyi etkilemiyor.
+
+Aynı küçük denemede (GuitarSet'in 8 kaydı, 40 kısa epoch) oyuncu 05'in sololarında:
+
+| GuitarSet oyuncu 05 sololar | 1. tur (tam eğitim) | 2. tur kafası (küçük deneme) | 1. tur kafası (küçük deneme) |
+|---|---|---|---|
+| Vibrato derinliği (pickup 0.34) | 0.08 | 0.16 | 0.03 |
+| Pickup'ta vibratolu 42 notadan işaretlenen | 7 | 21 | 1 |
+| 25 cent içinde | %91.8 | %92.6 | %80.4 |
+
+Neredeyse hiç eğitilmeden bile vibratoyu tam eğitilmiş 1. turdan iyi izliyor. Veri 1. turla aynı kayıtlar ve varyantlar; zip yaklaşık 4 GB (`guitarset_contour5.zip`). Notebook'ta `ROUND = 2` varsayılan.
+
+**2. turun sonucu: 1. turdan çok iyi, harmonik toplamı hâlâ geçmiyor; uygulama harmonik toplamda kalıyor.** Colab'da en iyi skor 66. epoch'ta (`ml/checkpoints/guitar_contour5/best.pt`: `val_contour_f1` 0.740, artık 0.5 eşiğinde; nota karesi F1 0.886). Ölçerken iki şey değişti:
+
+- Model saniyede 86 kare veriyor (hop 512), kurallar ise harmonik toplamın 172 karesinde seçilmişti. Aynı bend yarı kare hızında kareler arasında iki kat büyük adım atıyor ve "slide gibi tırmanıyor" şartına takılıyor, medyan filtre de iki kat uzun bir süreyi düzlüyor. `ContourTracker.from_audio` modelin çıkışını artık zamanda `hop_length` hızına yeniden örnekliyor (AR+FS bend F 0.44 → 0.53).
+- Kalan bend kayıplarının çoğu (AR+FS'de 41) notanın başının daha çalınırken bükülmüş olmasından geliyor. Harmonik toplamın 46 ms'lik penceresi pena atağındaki basılı perdeyi bir süre tutuyor, kontur modeli tutmuyor: başlangıç notanın bir yarım ton üstüne yuvarlanıyor ve "başlangıç bir perdeye oturmuyor" diye eleniyor. Yeni `bend_above` ayarı başlangıcın notanın bu kadar yarım ton üstünde olmasına izin veriyor, basılı perde o zaman notanın kendisi sayılıyor. (GuitarSet pickup'ına göre iki izleyicinin eğrisi arasında zaman kayması yok, ikisi de en iyi +2–3 karede.)
+
+| | Harmonik toplam | Kontur, 1. tur | Kontur, 2. tur |
+|---|---|---|---|
+| GuitarSet oyuncu 05 sololar: ortanca hata / 25 cent içinde | 3.5 cent / %91.5 | 3.9 cent / %91.8 | 6.4 cent / %94.0 |
+| GuitarSet oyuncu 05: vibrato F (P / R) | 0.57 (0.46 / 0.74) | – | 0.46 (0.35 / 0.69) |
+| IDMT AR+FS, IDMT notalarıyla: bend F, `bend_above` 0 → 1 | 0.75 → 0.78 | – | 0.53 → 0.75 |
+| IDMT AR+FS: vibrato F | 0.65 | – | 0.56 |
+| IDMT LP, IDMT notalarıyla: bend F, `bend_above` 0 → 1 / vibrato F | 0.68 → 0.70 / 0.62 | 0.00 / 0.14 | 0.42 → 0.56 / 0.52 |
+| IDMT LP, modelin notalarıyla: bend F (`bend_above` 1) / vibrato F / slide F | 0.33 / 0.47 / 0.23 | – | 0.35 / 0.45 / 0.05 |
+
+Bend'de, başlangıç kuralı gevşetilince kontur modeli harmonik toplama yaklaşıyor (modelin notalarıyla LP'de biraz önde, ama 17'ye 16 işaret). Vibratoda geride: normal notaların daha çoğunu titreşiyor sayıyor (LP'de %0.8, harmonik toplamda %0.1), eğri sabit bir notada da biraz oynuyor. Slide'da çok geride. `bend_above` varsayılan olarak 1: harmonik toplamda da AR+FS'de ve LP'de bend'i biraz artırıyor, modelin notalarıyla (uygulamanın yaptığı) bir şey değiştirmiyor.
+
+### Modelin notalarında neler kayboluyor
+
+IDMT LP'de, modelin notalarıyla etiketli her tekniğin nereye gittiği (harmonik toplam, `bend_above` 1, aşağıdaki `bend_extend` öncesi):
+
+| IDMT LP | Bulunan | Nota var, kural "hayır" | Model nota yazmamış | Model başka perdeden yazmış |
+|---|---|---|---|---|
+| Bend (57) | 12 | 17 | 21 | 6 (bükülmüş perdeden, geri perdelenmemiş) |
+| Slide (37) | 5 | 4 | 9 (ilk nota) | 7 (ilk nota) |
+| Vibrato (54) | 18 | 32 | – | 4 (onset 50 ms'den uzak) |
+
+Kalan 11 slide'ın 8'i tek perdelik kayma: tasarım gereği ölçülmüyor. Diğer 3'ünde iniş notası yok ya da iki nota arasındaki boşluk kuralın dışında.
+
+- **Vibrato'da kayıp nota modelinde değil, kuralda:** notaların %95'i eşleşiyor. Kural, IDMT'nin kendi nota sınırlarıyla bile vibratoların yarısını kaçırıyor. Modelin notaları %20–25 daha kısa; bu da LP'de 6 vibrato daha kaybettiriyor.
+- **Notası hiç yazılmayan bend'lerin hepsi Lick11'den.** Muted çekimlerde (`MN`) bend'ler 0.1–0.15 s süren notalar ve modelin frame olasılığı neredeyse sıfır. Diğer çekimlerde bend legato çalınıyor (önceki notadan pena vurulmadan). Frame olasılığı komşu perdelere dağılıyor (0.2–0.5), onset ise ≈ 0. Decoder onset istediği için nota yazmıyor.
+- **Denenen ve bırakılan: frame olasılığından nota kurtarma.** Notası olmayan yerlerde frame olasılığı ±1 yarım ton toplandı, çalan notalardan ve onların üst harmoniklerinden uzak bölgeler aday nota sayıldı. Bükülünce kesilen notaların uzatılmış hâli de aday oldu.
+  - Adayların hepsi eklenince AR+FS'de nota F1 0.792'den 0.787'ye ve altına düştü. Eklenenlerin çoğu, var olan bir notanın içinde yeniden başlayan kopyalardı.
+  - Yalnızca kuralların bend ya da slide bulduğu adaylar tutulunca bend F AR+FS'de 0.51'den 0.54'e, LP'de 0.33'ten 0.35'e çıktı. Ama LP'de eklenen 6 bend'in 4'ü yanlıştı, GuitarSet oyuncu 05'te (pickup'a göre) eklenen 7 bend'in hepsi yanlıştı (P 0.40 → 0.17).
+  - Uygulamaya alınmadı.
+- **Kesilen notayı ileri okumak (`bend_extend`, uygulamada).** Model, perde basılan notanın bininden ayrılınca notayı bitiriyor; çoğu zaman bend tutulmadan önce. "Nota var, kural hayır diyor" grubunun ve bükülmüş perdeden yazılan notaların çoğunda kural, eğri çok kısa olduğu için ya da bend'in tepesini görmediği için bend bulamıyordu.
+  - Bend'i olmayan bir nota, en çok 0.2 s ileriye kadar yeniden okunuyor. Perdesine yakın bir sonraki notayı geçmiyor, akorlarda denenmiyor. Bend notanın içinde başlamışsa nota bend sayılıyor ve bitişi uzatılıyor.
+  - "Bend nota bittikten sonra başlıyorsa sayma" şartı olmadan GuitarSet'in akor kayıtlarında yanlış bend'ler çıkıyordu.
+  - 0.1, 0.2 ve 0.3 s, AR+FS'de birbirinden en çok bir nota farklı.
+
+| Modelin notalarıyla, bend | Önce | `bend_extend` 0.2 |
+|---|---|---|
+| IDMT AR+FS (ayar): P / R / F | 0.89 / 0.36 / 0.51 | 0.91 / 0.46 / **0.62** |
+| IDMT LP (test): P / R / F | 0.75 / 0.21 / 0.33 | 0.78 / 0.25 / **0.37** |
+| GuitarSet oyuncu 05, solo + akor: işaretlenen / pickup'ta da bend | 5 / 2 | 5 / 2 |
+| GuitarSet oyuncu 00–04, sololar: işaretlenen / pickup'ta da bend | 17 / 3 | 28 / 4 |
+
+Vibrato ve slide değişmiyor, IDMT'nin normal notalarında yeni bend yok. GuitarSet sololarında eklenen 11 bend'in 10'u, aynı pencerede pickup eğrisinde bend değil. Bunlar çoğunlukla notanın sonunda parmak kalkarken perdenin kısa bir sıçraması ve ardından gelen çınlama (13 858 eşleşen notada %0.08). Ses gücü, bend miktarı ve zamanlama bunları gerçek bend'lerden ayırmadı.
+
+`benchmark_techniques.py --notes model` artık notaları değil modelin olasılıklarını önbelleğe alıyor (`ml/data/interim/techniques/*.npz`). Böylece decoder'daki bir değişiklik modeli yeniden çalıştırmadan ölçülebiliyor; decoder ayarları `--inference onset_threshold=0.4` gibi değiştirilebiliyor.
 
 ## Farklı akortlar ve capo
 

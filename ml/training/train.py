@@ -43,6 +43,22 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+CONTOUR_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5)
+
+
+def contour_metrics(probs: np.ndarray, target: np.ndarray) -> dict[str, float]:
+    """Contour F1 at the best of ``CONTOUR_THRESHOLDS`` (with its precision, recall and
+    threshold). A contour head can place the pitch well while staying unsure how loud
+    it is: the frequency-convolutional head found the target bin in most frames with
+    probabilities below 0.5, where a fixed 0.5 threshold scored nothing."""
+    best: dict[str, float] = {}
+    for threshold in CONTOUR_THRESHOLDS:
+        metrics = frame_metrics(probs >= threshold, target)
+        if not best or metrics["f1"] > best["f1"]:
+            best = {**metrics, "threshold": threshold}
+    return {f"val_contour_{k}": v for k, v in best.items()}
+
+
 class Trainer:
     """Training loop with AMP, gradient clipping, per-epoch validation and callbacks."""
 
@@ -65,7 +81,11 @@ class Trainer:
         )
         self.criterion = TranscriptionLoss(
             t.get("loss_weights"),
-            {"onset": t.get("onset_pos_weight"), "offset": t.get("offset_pos_weight")},
+            {
+                "onset": t.get("onset_pos_weight"),
+                "offset": t.get("offset_pos_weight"),
+                "contour": t.get("contour_pos_weight"),
+            },
         )
         self.use_amp = bool(t.get("amp", True)) and device.type == "cuda"
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -110,6 +130,7 @@ class Trainer:
         self.model.eval()
         loss_sum, steps = 0.0, 0
         frame_pred, frame_true, tab_pred, tab_true = [], [], [], []
+        contour_pred, contour_true = [], []
         for batch in loader:
             batch = self._to_device(batch)
             outputs = self.model(batch["features"])
@@ -125,6 +146,12 @@ class Trainer:
                 n_strings = outputs["tab"].shape[2]
                 tab_pred.append(outputs["tab"].argmax(-1).cpu().numpy().reshape(-1, n_strings))
                 tab_true.append(batch["tab"].cpu().numpy().reshape(-1, n_strings))
+            if "contour" in outputs and "contour" in batch:
+                # Cells above half height: the true pitch's bin and its nearest neighbours.
+                n_bins = outputs["contour"].shape[-1]
+                probs = torch.sigmoid(outputs["contour"]).half()
+                contour_pred.append(probs.cpu().numpy().reshape(-1, n_bins))
+                contour_true.append(batch["contour"].cpu().numpy().reshape(-1, n_bins) >= 0.5)
 
         logs = {"val_loss": loss_sum / max(steps, 1)}
         metrics = frame_metrics(np.concatenate(frame_pred), np.concatenate(frame_true))
@@ -139,6 +166,8 @@ class Trainer:
                 n_pitches=num_pitches(self.cfg),
             )
             logs.update({f"val_tab_{k}": v for k, v in metrics.items()})
+        if contour_pred:
+            logs.update(contour_metrics(np.concatenate(contour_pred), np.concatenate(contour_true)))
         return logs
 
     def fit(self, train_loader: DataLoader, val_loader: DataLoader) -> None:
@@ -291,7 +320,12 @@ def main(argv: list[str] | None = None) -> None:
         device,
         callbacks=[
             ModelCheckpoint(ckpt_dir, monitor, mode),
-            EarlyStopping(monitor, mode, patience=t.get("early_stopping_patience", 15)),
+            EarlyStopping(
+                monitor,
+                mode,
+                patience=t.get("early_stopping_patience", 15),
+                history=ckpt_dir / "history.csv",
+            ),
             CSVLogger(ckpt_dir / "history.csv"),
         ],
     )

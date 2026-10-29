@@ -17,9 +17,15 @@ from typing import Any
 import numpy as np
 
 from ml.config import tab_shape
-from ml.preprocessing.annotations import load_guitarset_jams, notes_to_array, notes_to_targets
+from ml.preprocessing.annotations import (
+    contours_to_targets,
+    load_guitarset_contours,
+    load_guitarset_jams,
+    notes_to_array,
+    notes_to_targets,
+)
 from ml.preprocessing.audio import load_audio
-from ml.preprocessing.augmentation import apply_variant
+from ml.preprocessing.augmentation import apply_variant, variant_contours
 from ml.preprocessing.spectrogram import compute_features
 from music_core.notes import Note
 
@@ -79,8 +85,12 @@ def preprocess_track(
     variant: dict[str, Any] | None = None,
     rng: np.random.Generator | None = None,
 ) -> dict[str, np.ndarray]:
-    """Features + targets for one track (optionally an offline augmentation variant)."""
+    """Features + targets for one track (optionally an offline augmentation variant).
+
+    With ``labels.contour`` configured, the hexaphonic pickup's pitch contours become a
+    ``contour`` target too (moved along with pitch shift and time stretch)."""
     y, notes = load_track(track, cfg)
+    contours = load_guitarset_contours(track.jams_path) if cfg["labels"].get("contour") else None
     if variant is not None:
         tab = cfg["tab"]
         y, notes = apply_variant(
@@ -92,13 +102,21 @@ def preprocess_track(
             tuning=tab["tuning"],
             num_frets=tab["num_frets"],
         )
-    return preprocess_audio(y, notes, cfg)
+        if contours is not None:
+            contours = variant_contours(contours, variant)
+    return preprocess_audio(y, notes, cfg, contours)
 
 
 def preprocess_audio(
-    y: np.ndarray, notes: list[Note], cfg: dict[str, Any]
+    y: np.ndarray,
+    notes: list[Note],
+    cfg: dict[str, Any],
+    contours: dict[int, tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> dict[str, np.ndarray]:
-    """Features + frame targets + reference notes, ready for ``np.savez_compressed``."""
+    """Features + frame targets + reference notes, ready for ``np.savez_compressed``.
+
+    ``contours`` (per string: times, fractional MIDI) add the ``contour`` target laid out
+    by ``labels.contour`` (``bins_per_semitone``, ``sigma``)."""
     audio, labels, tab = cfg["audio"], cfg["labels"], cfg["tab"]
     features = compute_features(y, cfg)
     num_strings, _ = tab_shape(cfg)
@@ -114,7 +132,7 @@ def preprocess_audio(
         onset_frames=labels.get("onset_frames", 1),
         offset_frames=labels.get("offset_frames", 1),
     )
-    return {
+    data = {
         "features": features.astype(np.float16),
         "onset": targets["onset"],
         "frame": targets["frame"],
@@ -122,6 +140,19 @@ def preprocess_audio(
         "tab": targets["tab"],
         "notes": notes_to_array(notes),
     }
+    if contours is not None:
+        contour = labels["contour"]
+        data["contour"] = contours_to_targets(
+            contours,
+            n_frames=features.shape[1],
+            sample_rate=audio["sample_rate"],
+            hop_length=audio["hop_length"],
+            min_midi=labels["min_midi"],
+            max_midi=labels["max_midi"],
+            bins_per_semitone=contour.get("bins_per_semitone", 3),
+            sigma=contour.get("sigma", 1.0),
+        )
+    return data
 
 
 def player_splits(

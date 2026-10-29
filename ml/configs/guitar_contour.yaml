@@ -1,0 +1,54 @@
+# Pitch-contour model (step 2 of the playing-techniques work): a contour head at three
+# bins per semitone, as in Basic Pitch, next to the note heads. It is trained on
+# GuitarSet's pitch_contour annotations (the hexaphonic pickup, every string followed
+# every 5.8 ms), so bends, vibrato and slides become moving activations the
+# technique detection can read instead of the hand-made harmonic-sum tracker.
+#
+# Only GuitarSet has contours, so the model trains on it alone. The input is a CQT at
+# the contour's resolution (36 bins per octave) and twice the frame rate of the note
+# models (hop 512, ~86 frames/s), fast enough to follow a 9 Hz vibrato.
+#
+#   python scripts/prepare_dataset.py --config ml/configs/guitar_contour.yaml --augment \
+#       --variants ps+1 ps-2 tempo0.9 noise overdrive room codec
+#   python scripts/train.py --config ml/configs/guitar_contour.yaml
+#
+# Training runs on Colab (notebooks/train_contour_colab.ipynb); data is prepared here.
+extends: guitar.yaml
+
+audio:
+  hop_length: 512            # ~11.6 ms per frame (~86 frames/s)
+
+features:
+  type: cqt
+  n_bins: 252                # 7 octaves at 36 bins/octave: C2 (65 Hz) .. C9
+  bins_per_octave: 36
+  fmin_midi: 36
+
+labels:
+  min_midi: 36               # C2: room for the ps-2 variant and lowered tunings
+  max_midi: 88
+  contour:
+    bins_per_semitone: 3     # 33 cents per bin; (88 - 36) * 3 + 1 = 157 bins
+    sigma: 1.0               # Gaussian width of each target point, in bins
+
+model:
+  heads: [contour, onset, frame, offset]
+  freq_pools: [2, 2, 1]      # keep 63 frequency rows (~1.2 semitone each) for the contour
+
+training:
+  epochs: 80
+  batch_size: 16
+  segment_frames: 512        # ~6 s random crops at the higher frame rate
+  repeats: 1
+  lr: 6.0e-4
+  preload: false             # ~2 GB of tracks; Colab's 12 GB RAM can't hold them unpacked
+  num_workers: 2             # Linux (Colab) loads from disk in parallel
+  loss_weights:
+    contour: 1.0
+  monitor: val_contour_f1
+  early_stopping_patience: 12
+
+paths:
+  processed_dir: ml/data/processed/guitarset_contour
+  splits_dir: ml/data/splits/guitarset_contour
+  checkpoint_dir: ml/checkpoints/guitar_contour

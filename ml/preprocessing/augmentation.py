@@ -317,6 +317,16 @@ def stretch_notes(notes: Sequence[Note], rate: float) -> list[Note]:
     return [replace(n, start=n.start / rate, end=n.end / rate) for n in notes]
 
 
+def variant_contours(
+    contours: dict[int, tuple[np.ndarray, np.ndarray]], variant: dict[str, Any]
+) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    """Per-string (times, MIDI) pitch contours as ``apply_variant`` changes the audio:
+    pitch shift moves them, time stretch rescales their times; effects leave them as is."""
+    steps = float(variant.get("pitch_shift") or 0)
+    rate = float(variant.get("time_stretch") or 1.0)
+    return {s: (times / rate, pitches + steps) for s, (times, pitches) in contours.items()}
+
+
 def apply_variant(
     y: np.ndarray,
     notes: Sequence[Note],
