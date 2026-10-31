@@ -442,7 +442,7 @@ Analiz notalardan ve kayıttan bulunanlardan yapılır (`packages/music-core/ana
 - **Tempo inceltme (tek tempoda):** Ses tabanlı tempo tahmini kaba bir çözünürlükte çalışır, ama %1'lik hata bile ızgarayı her 100 vuruşta bir vuruş kaydırır. Tahmin, notaların vuruş ve yarım vuruş periyodikliğini en iyi açıklayan tempoya (±%4 içinde) inceltilir.
 - **Ton:** Nota sürelerinin perde sınıfı histogramı, Temperley–Kostka–Payne majör/minör profilleriyle karşılaştırılır. Armür ve nota/akor isimleri (F majörde Bb, A minörde G#) buna göre yazılır.
 - **Ölçü ızgarası (tek tempoda):** Uzun ve bas notaların vuruşa düştüğü faz seçilir. Ölçü başı, armoninin en çok değiştiği vuruştur (akorlar genelde ölçü başında değişir).
-- **Akorlar:** Her vuruşta çalan notaların kroması; majör, minör, 7, maj7, m7, power (5), sus2, sus4 ve dim şablonlarıyla eşleştirilir, Viterbi ile yumuşatılır, bas notası farklıysa slash akor (D/F#) yazılır. Gitar projelerinde buna kayıttan tanınan akorlar da katılır ([Akorlar: BTC + notalar](#akorlar-btc--notalar)). Tek sesli melodilere akor yazılmaz.
+- **Akorlar:** Her vuruşta çalan notaların kroması; majör, minör, 7, maj7, m7, power (5), sus2, sus4 ve dim şablonlarıyla eşleştirilir, Viterbi ile yumuşatılır, bas notası farklıysa slash akor (D/F#) yazılır. Notalar akorun üstünde bir gerilim tutuyorsa adına eklenir (Cadd9, Am7(11), G13; [Genişletilmiş akorlar](#genişletilmiş-akorlar-9-11-13)). Gitar projelerinde buna kayıttan tanınan akorlar da katılır ([Akorlar: BTC + notalar](#akorlar-btc--notalar)). Tek sesli melodilere akor yazılmaz.
 
 GuitarSet oyuncu 05'in model transkripsiyonları üzerinde (uygulamanın gördüğü girdi; V9 + V7):
 
@@ -486,6 +486,39 @@ Gitar projelerinde transkripsiyon sırasında BTC'nin her vuruş için en olası
 | **BTC + notalar** | **0.682** | **0.656** | **0.525** |
 
 Kayıttan tanınan akorlar BTC'nin sözlüğüyle geliyor (6, m6, dim7, m7b5, aug, m(maj7) dahil). Vuruş takibi olmadan (model kurulu değilse) akorlar eskisi gibi yalnız notalardan çıkıyor.
+
+### Genişletilmiş akorlar (9, 11, 13)
+
+BTC'nin sözlüğünde 9'lu, 11'li ve 13'lü akorlar yok. Notalar ise gitarcının tuttuğu gerilimi duyuyor. Akor bulunduktan sonra, akorun vuruşları boyunca notaların kroması o akorun üstüne bir gerilim ekliyor mu diye bakılıyor (`_BeatGrid._with_tensions`, `packages/music-core/analysis.py`). Bir gerilim, iki şart birlikte sağlanırsa akorun adına ekleniyor: akor boyunca çalma süresi, akorun en güçlü tonunun en az yarısı kadar olmalı ve akorun vuruşlarının en az yarısında çalmalı.
+
+| Akor + gerilim | Ad |
+|---|---|
+| majör / minör + 9 | add9 / m(add9) |
+| 7 / maj7 / m7 + 9 | 9 / maj9 / m9 |
+| 6 / m6 + 9 | 6/9 / m6/9 |
+| minör / m7 + 11 | m(add11) / m7(11), 9 ile m11 |
+| 7 + 13 | 13 (9'lu ya da 9'suz) |
+
+Majör akorun üstündeki 11 yazılmıyor: GuitarSet'te bu durum 10'da yalnızca 6 kez gerçekten bir 11 idi, çoğu zaman bir sus4 geçişiydi.
+
+Ölçüm (`scripts/benchmark_guitar_chords.py`): GuitarSet eşlik kayıtları, uygulamanın yaptığı gibi V10 + V7 notaları, takip edilen vuruşlar ve BTC + nota füzyonu. GuitarSet'in "çalınan akor" etiketleri heksafonik pickup notalarından çıkarıldığı için gerilimleri de içeriyor. Bir gerilim, akorun kökü doğru olan anlarda zamana göre ölçülüyor. Eşikler oyuncu 00–03'te seçildi, test oyuncu 05.
+
+```bash
+python scripts/benchmark_guitar_chords.py --players 00 01 02 03
+python scripts/benchmark_guitar_chords.py --players 05
+```
+
+| Oyuncu 05 (oyuncu 00–03) | Önce | Sonra |
+|---|---|---|
+| 9: P / R | – / 0 | **1.00 / 0.74** (0.86 / 0.53) |
+| 13: P / R | – / 0 | 0.97 / 0.35 (00–03'te nadir, hiç bulunmadı) |
+| 11: P / R | – / 0 | hiç bulunmadı (0.95 / 0.09) |
+| Gerilimlerin tamamı doğru: P / R | – / 0 | 0.91 / 0.47 (0.80 / 0.28) |
+| Kök / majör-minör / 7'liler (nota kağıdına göre) | 0.706 / 0.679 / 0.545 | aynı |
+
+Çalınan akorlarda gerilim, oyuncu 05'te zamanın %17'sinde, 00–03'te %7'sinde var. GuitarSet'teki 11'lerin çoğu majör akorların üstünde olduğu için 11'de recall düşük.
+
+Yeni akorların gitar şemaları da var: Cadd9 x32030, Em(add9) 024000, E9 020102, Cmaj9 x30000, Am7(11) x00010, E13 020120, ayrıca A telinde kökü olan taşınabilir 9, maj9, m9, 6/9 ve add9 şekilleri. Şeması tanımlı olmayanlar aranıyor. MusicXML, gerilimi `dominant-ninth` gibi bir `kind` ile, kind'ın tutmadığı durumda `degree` (add 9/11/13) ile yazıyor. Editörün akor seçicisinde de bu türler var. Şarkı modunun akorları yalnızca BTC'den geldiği için gerilim yazılmıyor.
 
 ### Ritim kalıbı
 

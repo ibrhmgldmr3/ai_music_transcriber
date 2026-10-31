@@ -42,6 +42,20 @@ QUALITIES: dict[str, tuple[tuple[int, ...], str]] = {
     "aug": ((0, 4, 8), "aug"),
     "minmaj7": ((0, 3, 7, 11), "m(maj7)"),
     "5": ((0, 7), "5"),
+    # Tensions the notes show on top of a chord (music_core.analysis): ninths, an eleventh
+    # over a minor chord, a thirteenth over a dominant seventh.
+    "maj(9)": ((0, 4, 7, 2), "add9"),
+    "min(9)": ((0, 3, 7, 2), "m(add9)"),
+    "9": ((0, 4, 7, 10, 2), "9"),
+    "maj9": ((0, 4, 7, 11, 2), "maj9"),
+    "min9": ((0, 3, 7, 10, 2), "m9"),
+    "maj6(9)": ((0, 4, 7, 9, 2), "6/9"),
+    "min6(9)": ((0, 3, 7, 9, 2), "m6/9"),
+    "min(11)": ((0, 3, 7, 5), "m(add11)"),
+    "min7(11)": ((0, 3, 7, 10, 5), "m7(11)"),
+    "min11": ((0, 3, 7, 10, 2, 5), "m11"),
+    "7(13)": ((0, 4, 7, 10, 9), "13"),
+    "9(13)": ((0, 4, 7, 10, 2, 9), "13"),
 }
 _ROOTS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 _SPAN = 4  # frets a hand covers
@@ -66,6 +80,10 @@ _OPEN_SHAPES = [
     ("A:min6", "x02212", 1.6), ("E:min6", "022020", 1.2), ("D:min6", "xx0201", 1.6),
     ("E:5", "022xxx", 0.8), ("A:5", "x022xx", 0.8), ("D:5", "xx023x", 0.9),
     ("C:aug", "x32110", 1.9),
+    ("C:maj(9)", "x32030", 1.5), ("G:maj(9)", "320203", 1.8), ("E:min(9)", "024000", 1.2),
+    ("C:9", "x32333", 2.4), ("E:9", "020102", 1.6), ("A:9", "x02423", 2.2),
+    ("C:maj9", "x30000", 1.4), ("E:min9", "022032", 1.5), ("A:min7(11)", "x00010", 1.0),
+    ("E:min7(11)", "000000", 0.8), ("E:7(13)", "020120", 1.4),
 ]  # fmt: skip
 
 # Movable shapes: (root string, fret offsets from the root's fret per string, None =
@@ -86,6 +104,13 @@ _MOVABLE: dict[str, list[tuple[int, tuple[int | None, ...], float]]] = {
     "hdim7": [(1, (None, 0, 1, 0, 1, None), 2.6), (0, (0, None, 0, 0, -1, None), 2.8)],
     "aug": [(1, (None, 0, 3, 2, 2, None), 3.0)],
     "minmaj7": [(1, (None, 0, 2, 1, 1, 0), 3.2)],
+    "maj(9)": [(1, (None, 0, 2, 4, 2, None), 3.2)],
+    "9": [(1, (None, 0, -1, 0, 0, 0), 3.0)],
+    "maj9": [(1, (None, 0, -1, 1, 0, None), 3.0)],
+    "min9": [(1, (None, 0, -2, 0, 0, 0), 3.2)],
+    "maj6(9)": [(1, (None, 0, -1, -1, 0, 0), 3.0)],
+    "min7(11)": [(1, (None, 0, 0, 0, 1, None), 3.0)],
+    "7(13)": [(0, (0, None, 0, 1, 2, None), 2.8)],
 }
 
 
@@ -113,7 +138,8 @@ class ChordSymbol:
         root = _note(root_text)
         if root is None:
             raise ValueError(f"Not a chord: {label!r}")
-        quality = quality.split("(")[0] or "maj"
+        if quality not in QUALITIES:  # "maj(9)" has its own entry, "min7(*5)" doesn't
+            quality = quality.split("(")[0] or "maj"
         if quality not in QUALITIES:
             raise ValueError(f"Unknown chord quality: {label!r}")
         bass = None
@@ -178,7 +204,9 @@ def voicing(
 @lru_cache(maxsize=4096)
 def _voicing(chord: ChordSymbol, tuning: tuple[int, ...], max_fret: int) -> Voicing | None:
     if tuning == tuple(STANDARD_TUNING) and chord.bass is None:
-        return _standard_voicing(chord, max_fret)
+        found = _standard_voicing(chord, max_fret)
+        if found is not None:
+            return found
     # Slash chords (and every chord in other tunings) are searched: the bass note lowest,
     # e.g. D/F# 200232, G/B x20003, C/E 032010.
     return _searched_voicing(chord, tuning, max_fret)

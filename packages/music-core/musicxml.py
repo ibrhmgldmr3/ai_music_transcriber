@@ -60,6 +60,28 @@ _HARMONY_KINDS = {
     "hdim7": "half-diminished",
     "aug": "augmented",
     "minmaj7": "major-minor",
+    "maj(9)": "major",
+    "min(9)": "minor",
+    "9": "dominant-ninth",
+    "maj9": "major-ninth",
+    "min9": "minor-ninth",
+    "maj6(9)": "major-sixth",
+    "min6(9)": "minor-sixth",
+    "min(11)": "minor",
+    "min7(11)": "minor-seventh",
+    "min11": "minor-11th",
+    "7(13)": "dominant",
+    "9(13)": "dominant-13th",
+}
+# Tensions a harmony's kind doesn't hold, written as added degrees.
+_HARMONY_DEGREES = {
+    "maj(9)": (9,),
+    "min(9)": (9,),
+    "maj6(9)": (9,),
+    "min6(9)": (9,),
+    "min(11)": (11,),
+    "min7(11)": (11,),
+    "7(13)": (13,),
 }
 
 DOCTYPE = (
@@ -378,6 +400,11 @@ def _write_harmony(measure: ET.Element, chord: Chord, key: Key | None, offset: i
         ET.SubElement(bass, "bass-step").text = step
         if alter:
             ET.SubElement(bass, "bass-alter").text = str(alter)
+    for value in _HARMONY_DEGREES.get(chord.quality, ()):
+        degree = ET.SubElement(harmony, "degree")
+        ET.SubElement(degree, "degree-value").text = str(value)
+        ET.SubElement(degree, "degree-alter").text = "0"
+        ET.SubElement(degree, "degree-type").text = "add"
     if offset:
         ET.SubElement(harmony, "offset").text = str(offset)
     ET.SubElement(harmony, "staff").text = "1"

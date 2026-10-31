@@ -150,6 +150,20 @@ def test_chord_symbols():
         assert children.index("harmony") < children.index("note")
 
 
+def test_chord_symbols_with_tensions():
+    c_add9, g13 = [48, 52, 55, 62], [43, 53, 59, 64]
+    notes = [Note(p, beat, beat + 0.9) for beat in range(4) for p in c_add9]
+    notes += [Note(p, 4 + beat, 4.9 + beat) for beat in range(4) for p in g13]
+    root = parse(notes_to_musicxml(notes, tempo=TEMPO, downbeat=0.0, key=Key.parse("C major")))
+    harmonies = root.findall(".//harmony")
+    assert [h.findtext("kind") for h in harmonies] == ["major", "dominant"]
+    assert [h.find("kind").get("text") for h in harmonies] == ["add9", "13"]
+    degrees = [
+        (h.findtext("degree/degree-value"), h.findtext("degree/degree-type")) for h in harmonies
+    ]
+    assert degrees == [("9", "add"), ("13", "add")]
+
+
 @pytest.mark.parametrize("tempo", [0.0, float("nan")])
 def test_unusable_tempo_falls_back(tempo):
     root = parse(notes_to_musicxml([Note(60, 0.0, 1.0)], tempo=tempo))

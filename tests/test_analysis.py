@@ -142,6 +142,19 @@ def test_power_seventh_and_slash_chords():
     assert labels(progression([d_over_f_sharp, G])) == ["D/F#", "G"]
 
 
+def test_tensions_the_notes_hold_are_named():
+    c_add9 = [48, 52, 55, 62]  # x32030
+    g13 = [43, 53, 59, 64]  # 3x345x: G, F, B, E
+    a_m7_11 = [45, 52, 55, 60, 62]  # x00010: A, E, G, C, D
+    assert labels(progression([c_add9, g13, a_m7_11])) == ["Cadd9", "G13", "Am7(11)"]
+    # A ninth heard in one strum of four is a passing note, not the chord's.
+    passing = progression([C])
+    passing[0] = Note(62, passing[0].start, passing[0].end)
+    assert labels(passing) == ["C"]
+    # An eleventh over a major chord isn't named (on GuitarSet it was mostly a sus4).
+    assert labels(progression([[48, 52, 53, 55]])) == ["C"]
+
+
 def test_chord_names_are_spelled_in_the_key():
     b_flat = [46, 53, 58, 62]
     notes = progression([F, b_flat, C, F])
