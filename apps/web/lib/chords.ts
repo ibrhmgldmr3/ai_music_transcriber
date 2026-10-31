@@ -18,6 +18,18 @@ export const CHORD_QUALITIES: { value: string; label: string }[] = [
   { value: "hdim7", label: "m7b5" },
   { value: "aug", label: "aug" },
   { value: "5", label: "5" },
+  { value: "maj(9)", label: "add9" },
+  { value: "min(9)", label: "m(add9)" },
+  { value: "9", label: "9" },
+  { value: "maj9", label: "maj9" },
+  { value: "min9", label: "m9" },
+  { value: "maj6(9)", label: "6/9" },
+  { value: "min6(9)", label: "m6/9" },
+  { value: "min(11)", label: "m(add11)" },
+  { value: "min7(11)", label: "m7(11)" },
+  { value: "min11", label: "m11" },
+  { value: "7(13)", label: "13" },
+  { value: "9(13)", label: "13 (9 ile)" },
 ];
 
 /** Bass notes of slash chords: Harte intervals above the root and their semitones. */

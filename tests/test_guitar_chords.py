@@ -55,6 +55,16 @@ def test_labels_names_and_transposition():
         ChordSymbol.parse("H:maj")
 
 
+def test_chords_with_tensions():
+    add9 = ChordSymbol.parse("C:maj(9)")
+    assert (add9.quality, add9.name(), add9.harte) == ("maj(9)", "Cadd9", "C:maj(9)")
+    assert ChordSymbol.parse("G:7(13)").name() == "G13"
+    # A quality with degrees of its own isn't kept: GuitarSet's "min7(*5)" is a min7.
+    assert ChordSymbol.parse("A:min7(*5)").quality == "min7"
+    assert shape("C:maj(9)") == "x32030" and shape("E:min7(11)") == "000000"
+    assert shape("D:9") == "x54555"  # movable, the root on the A string
+
+
 def test_slash_chords():
     d_over_f_sharp = ChordSymbol.parse("D:maj/3")
     assert d_over_f_sharp == ChordSymbol(2, "maj", bass=6) == ChordSymbol.parse("D/F#")

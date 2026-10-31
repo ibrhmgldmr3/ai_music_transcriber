@@ -1,0 +1,974 @@
+{
+  ".claude/launch.json": {
+    "mtime": 1790169307.0043142,
+    "seen": 1792931190.8402674,
+    "ast_hash": "7baa80b8fd8d6be59450184af705d70c",
+    "semantic_hash": "7baa80b8fd8d6be59450184af705d70c"
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1790960826.0171793,
+    "seen": 1792931190.8402722,
+    "ast_hash": "17724abeea46a72503e36827ac5c0a37",
+    "semantic_hash": "17724abeea46a72503e36827ac5c0a37"
+  },
+  "apps/api/app/__init__.py": {
+    "mtime": 1790106079.5770683,
+    "seen": 1792931190.8402743,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "apps/api/app/api/__init__.py": {
+    "mtime": 1790960826.0221949,
+    "seen": 1792931190.8402758,
+    "ast_hash": "52b626f89f8f4613e29036341c24192f",
+    "semantic_hash": "52b626f89f8f4613e29036341c24192f"
+  },
+  "apps/api/app/api/analysis.py": {
+    "mtime": 1790960826.023195,
+    "seen": 1792931190.8402767,
+    "ast_hash": "87c4582ca9acafa97677b38c0ceba8fe",
+    "semantic_hash": "87c4582ca9acafa97677b38c0ceba8fe"
+  },
+  "apps/api/app/api/meta.py": {
+    "mtime": 1790960826.0241988,
+    "seen": 1792931190.8402777,
+    "ast_hash": "108c48589e7a79ec2312615f0f65303d",
+    "semantic_hash": "108c48589e7a79ec2312615f0f65303d"
+  },
+  "apps/api/app/api/routes.py": {
+    "mtime": 1790960826.025815,
+    "seen": 1792931190.8402789,
+    "ast_hash": "88e86edb372054b41f801c2ed7f45d02",
+    "semantic_hash": "88e86edb372054b41f801c2ed7f45d02"
+  },
+  "apps/api/app/config.py": {
+    "mtime": 1790175013.3097658,
+    "seen": 1792931190.8402798,
+    "ast_hash": "a06b49ef52ca8e53475a851810131b0a",
+    "semantic_hash": "a06b49ef52ca8e53475a851810131b0a"
+  },
+  "apps/api/app/main.py": {
+    "mtime": 1790140955.9960558,
+    "seen": 1792931190.8402805,
+    "ast_hash": "81fb9c55fa41be496ebf07aafafb3205",
+    "semantic_hash": "81fb9c55fa41be496ebf07aafafb3205"
+  },
+  "apps/api/app/models/__init__.py": {
+    "mtime": 1790106087.2542005,
+    "seen": 1792931190.8402815,
+    "ast_hash": "5b02842dd48e7ee4287a3a95a8e84995",
+    "semantic_hash": "5b02842dd48e7ee4287a3a95a8e84995"
+  },
+  "apps/api/app/models/database.py": {
+    "mtime": 1790960826.0270483,
+    "seen": 1792931190.8402827,
+    "ast_hash": "6a278febdc4cb42e15259de81f1e8dc9",
+    "semantic_hash": "6a278febdc4cb42e15259de81f1e8dc9"
+  },
+  "apps/api/app/models/project.py": {
+    "mtime": 1790960826.0280685,
+    "seen": 1792931190.8402836,
+    "ast_hash": "ee3871035f01f1030ce1f1459bb4adc4",
+    "semantic_hash": "ee3871035f01f1030ce1f1459bb4adc4"
+  },
+  "apps/api/app/schemas/__init__.py": {
+    "mtime": 1790960826.0280685,
+    "seen": 1792931190.8402846,
+    "ast_hash": "f59f07ec75d862e9f2325891dfa6c578",
+    "semantic_hash": "f59f07ec75d862e9f2325891dfa6c578"
+  },
+  "apps/api/app/schemas/project.py": {
+    "mtime": 1791410951.4106777,
+    "seen": 1792931190.8402855,
+    "ast_hash": "efc7941c61eeeefe3d65b3a8a872ad7a",
+    "semantic_hash": "efc7941c61eeeefe3d65b3a8a872ad7a"
+  },
+  "apps/api/app/security.py": {
+    "mtime": 1790169871.8318758,
+    "seen": 1792931190.8402865,
+    "ast_hash": "914379c9cf50395caee85bf8ab7fb5d3",
+    "semantic_hash": "914379c9cf50395caee85bf8ab7fb5d3"
+  },
+  "apps/api/app/services/__init__.py": {
+    "mtime": 1790106100.13975,
+    "seen": 1792931190.8402874,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "apps/api/app/services/storage.py": {
+    "mtime": 1790140679.3719134,
+    "seen": 1792931190.8402882,
+    "ast_hash": "c8ec1b88b34313afde94a646e0eb23be",
+    "semantic_hash": "c8ec1b88b34313afde94a646e0eb23be"
+  },
+  "apps/api/app/services/transcription.py": {
+    "mtime": 1791410983.539171,
+    "seen": 1792931190.8402894,
+    "ast_hash": "4cf8f0e6e8d79cb1b6eb6860cfe59eaf",
+    "semantic_hash": "4cf8f0e6e8d79cb1b6eb6860cfe59eaf"
+  },
+  "apps/api/app/workers/__init__.py": {
+    "mtime": 1790106109.6248648,
+    "seen": 1792931190.8402903,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "apps/api/app/workers/celery_app.py": {
+    "mtime": 1790106636.888988,
+    "seen": 1792931190.840291,
+    "ast_hash": "f06c176ebf3f5fe1f37a283ec8a5a09f",
+    "semantic_hash": "f06c176ebf3f5fe1f37a283ec8a5a09f"
+  },
+  "apps/api/app/workers/tasks.py": {
+    "mtime": 1790106112.6118057,
+    "seen": 1792931190.840292,
+    "ast_hash": "89bbf2bfcaa2dae261a87a4a447151b7",
+    "semantic_hash": "89bbf2bfcaa2dae261a87a4a447151b7"
+  },
+  "apps/web/app/editor/page.tsx": {
+    "mtime": 1790962223.7676451,
+    "seen": 1792931190.8402932,
+    "ast_hash": "cfe2fef693540713b54850ee52b17165",
+    "semantic_hash": "cfe2fef693540713b54850ee52b17165"
+  },
+  "apps/web/app/layout.tsx": {
+    "mtime": 1790106257.3695035,
+    "seen": 1792931190.8402941,
+    "ast_hash": "7bf67a452a9badc10d655fa5473edb89",
+    "semantic_hash": "7bf67a452a9badc10d655fa5473edb89"
+  },
+  "apps/web/app/page.tsx": {
+    "mtime": 1790106282.467844,
+    "seen": 1792931190.840295,
+    "ast_hash": "2f584d6ac8de515cb1409750c5401e31",
+    "semantic_hash": "2f584d6ac8de515cb1409750c5401e31"
+  },
+  "apps/web/app/projects/page.tsx": {
+    "mtime": 1790960826.035043,
+    "seen": 1792931190.8402963,
+    "ast_hash": "dba54ce454505883d4aef70aa158e66e",
+    "semantic_hash": "dba54ce454505883d4aef70aa158e66e"
+  },
+  "apps/web/app/settings/page.tsx": {
+    "mtime": 1790106299.0213761,
+    "seen": 1792931190.8402972,
+    "ast_hash": "13ced8a33ec316f4b5e4e5b578fb3a02",
+    "semantic_hash": "13ced8a33ec316f4b5e4e5b578fb3a02"
+  },
+  "apps/web/app/upload/page.tsx": {
+    "mtime": 1790610742.1307502,
+    "seen": 1792931190.840298,
+    "ast_hash": "9945b4ff92231488132c5d603f0e75d6",
+    "semantic_hash": "9945b4ff92231488132c5d603f0e75d6"
+  },
+  "apps/web/components/AudioUploader.tsx": {
+    "mtime": 1790960826.0363908,
+    "seen": 1792931190.840299,
+    "ast_hash": "0499cbdf36019e0e68a44be90bbb2400",
+    "semantic_hash": "0499cbdf36019e0e68a44be90bbb2400"
+  },
+  "apps/web/components/ChordChart.tsx": {
+    "mtime": 1790960826.0373955,
+    "seen": 1792931190.8403,
+    "ast_hash": "6c572926724e202f0298a75a0ae59ed9",
+    "semantic_hash": "6c572926724e202f0298a75a0ae59ed9"
+  },
+  "apps/web/components/ChordDiagram.tsx": {
+    "mtime": 1790960826.0373955,
+    "seen": 1792931190.8403008,
+    "ast_hash": "31fa823b56fd8b47401b9acbfcd4beff",
+    "semantic_hash": "31fa823b56fd8b47401b9acbfcd4beff"
+  },
+  "apps/web/components/GuitarTab.tsx": {
+    "mtime": 1791410951.4156518,
+    "seen": 1792931190.8403018,
+    "ast_hash": "20e9f73c9832dac5349810f5bea6930d",
+    "semantic_hash": "20e9f73c9832dac5349810f5bea6930d"
+  },
+  "apps/web/components/NotationView.tsx": {
+    "mtime": 1790437127.6267376,
+    "seen": 1792931190.8403027,
+    "ast_hash": "593519edd9d1f7f4ebbc627cea027589",
+    "semantic_hash": "593519edd9d1f7f4ebbc627cea027589"
+  },
+  "apps/web/components/NoteEditor.tsx": {
+    "mtime": 1791410951.4166515,
+    "seen": 1792931190.8403037,
+    "ast_hash": "685d955fc00276d432030a206d34f154",
+    "semantic_hash": "685d955fc00276d432030a206d34f154"
+  },
+  "apps/web/components/PianoRoll.tsx": {
+    "mtime": 1790960826.0396776,
+    "seen": 1792931190.8403044,
+    "ast_hash": "70ea3a1a4a187fa2ac70f99d5160e4c8",
+    "semantic_hash": "70ea3a1a4a187fa2ac70f99d5160e4c8"
+  },
+  "apps/web/components/PlaybackControls.tsx": {
+    "mtime": 1790267067.1463866,
+    "seen": 1792931190.8403053,
+    "ast_hash": "1324a88667731d2a2b837047d36374ac",
+    "semantic_hash": "1324a88667731d2a2b837047d36374ac"
+  },
+  "apps/web/components/RhythmPattern.tsx": {
+    "mtime": 1790960826.0406818,
+    "seen": 1792931190.8403063,
+    "ast_hash": "520e6190ee357d63a57b7df7d3052c28",
+    "semantic_hash": "520e6190ee357d63a57b7df7d3052c28"
+  },
+  "apps/web/components/TuningPicker.tsx": {
+    "mtime": 1790960826.0417945,
+    "seen": 1792931190.8403099,
+    "ast_hash": "90f21548fbe27bcef1d55c3ffa392b57",
+    "semantic_hash": "90f21548fbe27bcef1d55c3ffa392b57"
+  },
+  "apps/web/components/Waveform.tsx": {
+    "mtime": 1790267048.627234,
+    "seen": 1792931190.8403106,
+    "ast_hash": "2c8ecc73b1bc70cfeaf46c5b2714b9b5",
+    "semantic_hash": "2c8ecc73b1bc70cfeaf46c5b2714b9b5"
+  },
+  "apps/web/lib/api.test.ts": {
+    "mtime": 1790960826.042935,
+    "seen": 1792931190.8403113,
+    "ast_hash": "9e95a7395d358f7f922b3ba7aa5ed7cd",
+    "semantic_hash": "9e95a7395d358f7f922b3ba7aa5ed7cd"
+  },
+  "apps/web/lib/api.ts": {
+    "mtime": 1790960826.042935,
+    "seen": 1792931190.8403122,
+    "ast_hash": "24f91202d23c790344710399e67be18c",
+    "semantic_hash": "24f91202d23c790344710399e67be18c"
+  },
+  "apps/web/lib/chords.test.ts": {
+    "mtime": 1790962234.5324166,
+    "seen": 1792931190.8403132,
+    "ast_hash": "e326ca427ee8bf502380134fd3c2b1c6",
+    "semantic_hash": "e326ca427ee8bf502380134fd3c2b1c6"
+  },
+  "apps/web/lib/chords.ts": {
+    "mtime": 1790962223.7676451,
+    "seen": 1792931190.8403141,
+    "ast_hash": "1c7722d322c5df1dfa5d0a7567afc2e6",
+    "semantic_hash": "1c7722d322c5df1dfa5d0a7567afc2e6"
+  },
+  "apps/web/lib/editing.test.ts": {
+    "mtime": 1790960826.0450075,
+    "seen": 1792931190.8403149,
+    "ast_hash": "57e13daf9a1a6a29f7a7ea1f5449a1bc",
+    "semantic_hash": "57e13daf9a1a6a29f7a7ea1f5449a1bc"
+  },
+  "apps/web/lib/editing.ts": {
+    "mtime": 1790960826.0460086,
+    "seen": 1792931190.8403165,
+    "ast_hash": "51a964c2f2e87737bdcaf62f263c7350",
+    "semantic_hash": "51a964c2f2e87737bdcaf62f263c7350"
+  },
+  "apps/web/lib/music.test.ts": {
+    "mtime": 1791410951.4176521,
+    "seen": 1792931190.8403172,
+    "ast_hash": "b41b6bb7c1e4c0e9e23277bc5819843a",
+    "semantic_hash": "b41b6bb7c1e4c0e9e23277bc5819843a"
+  },
+  "apps/web/lib/music.ts": {
+    "mtime": 1791410951.4176521,
+    "seen": 1792931190.840318,
+    "ast_hash": "bd59e5bdfba24549dc7180e5ee7e43df",
+    "semantic_hash": "bd59e5bdfba24549dc7180e5ee7e43df"
+  },
+  "apps/web/lib/pitchCurve.test.ts": {
+    "mtime": 1790960826.049512,
+    "seen": 1792931190.840319,
+    "ast_hash": "e1381bdadd20e8bbde95f4dc894310ab",
+    "semantic_hash": "e1381bdadd20e8bbde95f4dc894310ab"
+  },
+  "apps/web/lib/pitchCurve.ts": {
+    "mtime": 1790960826.049512,
+    "seen": 1792931190.8403196,
+    "ast_hash": "095dcdb1c81600e2e5fee73d0dbbb27d",
+    "semantic_hash": "095dcdb1c81600e2e5fee73d0dbbb27d"
+  },
+  "apps/web/lib/pointerDrag.ts": {
+    "mtime": 1790436177.4188225,
+    "seen": 1792931190.8403206,
+    "ast_hash": "2c54b56da0013dd9c4e9a2c3d6c9ade5",
+    "semantic_hash": "2c54b56da0013dd9c4e9a2c3d6c9ade5"
+  },
+  "apps/web/lib/recorder.ts": {
+    "mtime": 1790436950.3485034,
+    "seen": 1792931190.8403215,
+    "ast_hash": "bfccc4507e6e63f68f6ad473b0e202a0",
+    "semantic_hash": "bfccc4507e6e63f68f6ad473b0e202a0"
+  },
+  "apps/web/lib/settings.ts": {
+    "mtime": 1790140781.4413707,
+    "seen": 1792931190.8403223,
+    "ast_hash": "8dd0533db7213c294c24da0b63f1ff26",
+    "semantic_hash": "8dd0533db7213c294c24da0b63f1ff26"
+  },
+  "apps/web/lib/synth.ts": {
+    "mtime": 1791743701.5571723,
+    "seen": 1792931190.840323,
+    "ast_hash": "98f2dad8109b8680e1fdcdd990366523",
+    "semantic_hash": "98f2dad8109b8680e1fdcdd990366523"
+  },
+  "apps/web/lib/techniques.test.ts": {
+    "mtime": 1791743741.3419025,
+    "seen": 1792931190.8403242,
+    "ast_hash": "52d93022ce25ebce329b0756fe5a3b05",
+    "semantic_hash": "52d93022ce25ebce329b0756fe5a3b05"
+  },
+  "apps/web/lib/techniques.ts": {
+    "mtime": 1791743668.904521,
+    "seen": 1792931190.8403249,
+    "ast_hash": "c04833cfd09bfbfcc07c4d7ade4cfe7a",
+    "semantic_hash": "c04833cfd09bfbfcc07c4d7ade4cfe7a"
+  },
+  "apps/web/lib/useHistory.ts": {
+    "mtime": 1790435993.2500648,
+    "seen": 1792931190.8403256,
+    "ast_hash": "6d5e4aef2e4538aa309d83410bb35ee1",
+    "semantic_hash": "6d5e4aef2e4538aa309d83410bb35ee1"
+  },
+  "apps/web/lib/usePlayback.ts": {
+    "mtime": 1790267031.7014318,
+    "seen": 1792931190.8403265,
+    "ast_hash": "6c040d68b33649742d8a3d87e0fe06ee",
+    "semantic_hash": "6c040d68b33649742d8a3d87e0fe06ee"
+  },
+  "apps/web/lib/wav.test.ts": {
+    "mtime": 1790436950.5863092,
+    "seen": 1792931190.8403275,
+    "ast_hash": "9c676756b3ebb420e60c2e5f42b0aebf",
+    "semantic_hash": "9c676756b3ebb420e60c2e5f42b0aebf"
+  },
+  "apps/web/lib/wav.ts": {
+    "mtime": 1790436950.0904148,
+    "seen": 1792931190.8403285,
+    "ast_hash": "e4ce84c350a8a9cbb35be694ac7466ba",
+    "semantic_hash": "e4ce84c350a8a9cbb35be694ac7466ba"
+  },
+  "apps/web/next.config.mjs": {
+    "mtime": 1790436960.721331,
+    "seen": 1792931190.8403294,
+    "ast_hash": "826e613be9c493e2db4cfdd9868d1bf2",
+    "semantic_hash": "826e613be9c493e2db4cfdd9868d1bf2"
+  },
+  "apps/web/package.json": {
+    "mtime": 1790437039.5164578,
+    "seen": 1792931190.8403301,
+    "ast_hash": "f9e5d07b769af420f2cd4da96a63518d",
+    "semantic_hash": "f9e5d07b769af420f2cd4da96a63518d"
+  },
+  "apps/web/tsconfig.json": {
+    "mtime": 1790106141.3722036,
+    "seen": 1792931190.840331,
+    "ast_hash": "5c1be44f53e4633d3b34b82d7c196939",
+    "semantic_hash": "5c1be44f53e4633d3b34b82d7c196939"
+  },
+  "docker-compose.gpu.yml": {
+    "mtime": 1790344384.1732347,
+    "seen": 1792931190.840332,
+    "ast_hash": "9ccf5b13a0fc0fbfd57f22030b5264f5",
+    "semantic_hash": "9ccf5b13a0fc0fbfd57f22030b5264f5"
+  },
+  "docker-compose.yml": {
+    "mtime": 1790960826.0515137,
+    "seen": 1792931190.8403327,
+    "ast_hash": "6dd7281bf73922d2099d1a2e98a3e88d",
+    "semantic_hash": "6dd7281bf73922d2099d1a2e98a3e88d"
+  },
+  "ml/__init__.py": {
+    "mtime": 1790105635.660849,
+    "seen": 1792931190.840334,
+    "ast_hash": "d9821a3ad504076f4df136c3ce835285",
+    "semantic_hash": "d9821a3ad504076f4df136c3ce835285"
+  },
+  "ml/config.py": {
+    "mtime": 1790283915.4712923,
+    "seen": 1792931190.8403347,
+    "ast_hash": "49533ae893e9f30eb52fbf48acc8edd2",
+    "semantic_hash": "49533ae893e9f30eb52fbf48acc8edd2"
+  },
+  "ml/configs/base.yaml": {
+    "mtime": 1790960826.052926,
+    "seen": 1792931190.8403356,
+    "ast_hash": "bef611b4f9c8d7a678cf4e8af985c694",
+    "semantic_hash": "bef611b4f9c8d7a678cf4e8af985c694"
+  },
+  "ml/configs/guitar.yaml": {
+    "mtime": 1790105821.8923948,
+    "seen": 1792931190.8403363,
+    "ast_hash": "bbf7693d6ae5aeea683bf6d636779ab2",
+    "semantic_hash": "bbf7693d6ae5aeea683bf6d636779ab2"
+  },
+  "ml/configs/guitar_mixed.yaml": {
+    "mtime": 1790319005.5796175,
+    "seen": 1792931190.840337,
+    "ast_hash": "f202fbb0804c478e93be7b5713a6912a",
+    "semantic_hash": "f202fbb0804c478e93be7b5713a6912a"
+  },
+  "ml/configs/guitar_mixed_low.yaml": {
+    "mtime": 1790436014.161273,
+    "seen": 1792931190.8403382,
+    "ast_hash": "0e4391c396b0a1ee9a4191bfb3fdf625",
+    "semantic_hash": "0e4391c396b0a1ee9a4191bfb3fdf625"
+  },
+  "ml/configs/guitar_room.yaml": {
+    "mtime": 1790960826.0542424,
+    "seen": 1792931190.840342,
+    "ast_hash": "e67429cb0a2659057d291ae09570e8d9",
+    "semantic_hash": "e67429cb0a2659057d291ae09570e8d9"
+  },
+  "ml/configs/guitar_room_egdb.yaml": {
+    "mtime": 1790960826.0542424,
+    "seen": 1792931190.840343,
+    "ast_hash": "adf6d1ea41806b3d9fec2810e0479451",
+    "semantic_hash": "adf6d1ea41806b3d9fec2810e0479451"
+  },
+  "ml/configs/guitar_tab.yaml": {
+    "mtime": 1790174853.9554396,
+    "seen": 1792931190.8403437,
+    "ast_hash": "911897550ab988138195ad87ee67ec3a",
+    "semantic_hash": "911897550ab988138195ad87ee67ec3a"
+  },
+  "ml/configs/guitar_tab_mixed.yaml": {
+    "mtime": 1790319009.5228467,
+    "seen": 1792931190.8403447,
+    "ast_hash": "86841b3140edd48145c9a8e43fb40981",
+    "semantic_hash": "86841b3140edd48145c9a8e43fb40981"
+  },
+  "ml/datasets/__init__.py": {
+    "mtime": 1790105686.1190264,
+    "seen": 1792931190.8403456,
+    "ast_hash": "c48748a1f860949bc727237bdf7d52e2",
+    "semantic_hash": "c48748a1f860949bc727237bdf7d52e2"
+  },
+  "ml/datasets/aam.py": {
+    "mtime": 1790960826.0642092,
+    "seen": 1792931190.8403466,
+    "ast_hash": "119dd86f4b23df664a42543a569e05ff",
+    "semantic_hash": "119dd86f4b23df664a42543a569e05ff"
+  },
+  "ml/datasets/dataset.py": {
+    "mtime": 1790436671.262652,
+    "seen": 1792931190.8403473,
+    "ast_hash": "063509920681d8b13e05ef4db4265c95",
+    "semantic_hash": "063509920681d8b13e05ef4db4265c95"
+  },
+  "ml/datasets/egdb.py": {
+    "mtime": 1790960826.0659373,
+    "seen": 1792931190.8403485,
+    "ast_hash": "08e92715f8ff179d7b2c6ed7eb7a4ead",
+    "semantic_hash": "08e92715f8ff179d7b2c6ed7eb7a4ead"
+  },
+  "ml/datasets/guitar_techs.py": {
+    "mtime": 1790318975.1782537,
+    "seen": 1792931190.8403492,
+    "ast_hash": "78bcf82774a8a1e5d24e65472f6c69cb",
+    "semantic_hash": "78bcf82774a8a1e5d24e65472f6c69cb"
+  },
+  "ml/datasets/guitarset.py": {
+    "mtime": 1790140746.3365068,
+    "seen": 1792931190.8403502,
+    "ast_hash": "c243ff110d3c268728414d9229d7391d",
+    "semantic_hash": "c243ff110d3c268728414d9229d7391d"
+  },
+  "ml/datasets/idmt.py": {
+    "mtime": 1791476798.3370671,
+    "seen": 1792931190.8403509,
+    "ast_hash": "a577e95cc3b780a77b32a273a8924f90",
+    "semantic_hash": "a577e95cc3b780a77b32a273a8924f90"
+  },
+  "ml/datasets/strums.py": {
+    "mtime": 1790960826.0659373,
+    "seen": 1792931190.840352,
+    "ast_hash": "e5e67208041b715f370b49edd424f0c1",
+    "semantic_hash": "e5e67208041b715f370b49edd424f0c1"
+  },
+  "ml/evaluation/__init__.py": {
+    "mtime": 1790105966.486267,
+    "seen": 1792931190.840353,
+    "ast_hash": "454efe1f50937e500c8402283484e55e",
+    "semantic_hash": "454efe1f50937e500c8402283484e55e"
+  },
+  "ml/evaluation/evaluate.py": {
+    "mtime": 1790435831.6650348,
+    "seen": 1792931190.8403537,
+    "ast_hash": "cc7ae31d14aa847bd982eddf8faa3fe5",
+    "semantic_hash": "cc7ae31d14aa847bd982eddf8faa3fe5"
+  },
+  "ml/evaluation/metrics.py": {
+    "mtime": 1790105983.6289897,
+    "seen": 1792931190.840355,
+    "ast_hash": "ae98f9fdebce0f7fa70540a41fc2835a",
+    "semantic_hash": "ae98f9fdebce0f7fa70540a41fc2835a"
+  },
+  "ml/evaluation/robustness.py": {
+    "mtime": 1790960826.0669503,
+    "seen": 1792931190.8403556,
+    "ast_hash": "9dadd594595c6181431f893bce00289b",
+    "semantic_hash": "9dadd594595c6181431f893bce00289b"
+  },
+  "ml/evaluation/visualization.py": {
+    "mtime": 1790106636.8899906,
+    "seen": 1792931190.8403563,
+    "ast_hash": "842af391b1eebb1ce088c1be5b452123",
+    "semantic_hash": "842af391b1eebb1ce088c1be5b452123"
+  },
+  "ml/inference/__init__.py": {
+    "mtime": 1790106011.7934976,
+    "seen": 1792931190.8403578,
+    "ast_hash": "327a53e3f79af11220653dddaf26a6e1",
+    "semantic_hash": "327a53e3f79af11220653dddaf26a6e1"
+  },
+  "ml/inference/chords.py": {
+    "mtime": 1790960826.0679553,
+    "seen": 1792931190.840359,
+    "ast_hash": "857eba8d7552fb139fbc2e6e59db1ff1",
+    "semantic_hash": "857eba8d7552fb139fbc2e6e59db1ff1"
+  },
+  "ml/inference/postprocess.py": {
+    "mtime": 1790436500.660308,
+    "seen": 1792931190.8403597,
+    "ast_hash": "0e089d28910a18b92a5d7e90d5c4dfb7",
+    "semantic_hash": "0e089d28910a18b92a5d7e90d5c4dfb7"
+  },
+  "ml/inference/predict.py": {
+    "mtime": 1791479301.124019,
+    "seen": 1792931190.8403606,
+    "ast_hash": "a36073f08e7645027a2dee027f5c05a5",
+    "semantic_hash": "a36073f08e7645027a2dee027f5c05a5"
+  },
+  "ml/inference/rhythm.py": {
+    "mtime": 1790960826.068954,
+    "seen": 1792931190.8403614,
+    "ast_hash": "2af65987f61d64439e698a62900e52f8",
+    "semantic_hash": "2af65987f61d64439e698a62900e52f8"
+  },
+  "ml/inference/separation.py": {
+    "mtime": 1790960826.0701878,
+    "seen": 1792931190.8403625,
+    "ast_hash": "805afb2ca9d85201e2a541b3d3d47fd8",
+    "semantic_hash": "805afb2ca9d85201e2a541b3d3d47fd8"
+  },
+  "ml/inference/song.py": {
+    "mtime": 1791410951.4196513,
+    "seen": 1792931190.8403633,
+    "ast_hash": "694a8fa2bac61d6b6cd9bf33ead0a5ae",
+    "semantic_hash": "694a8fa2bac61d6b6cd9bf33ead0a5ae"
+  },
+  "ml/inference/techniques.py": {
+    "mtime": 1791479125.0765052,
+    "seen": 1792931190.8403642,
+    "ast_hash": "d3eb9c92ab0d175a231374281fa438ec",
+    "semantic_hash": "d3eb9c92ab0d175a231374281fa438ec"
+  },
+  "ml/inference/voice.py": {
+    "mtime": 1790960826.0722163,
+    "seen": 1792931190.8403652,
+    "ast_hash": "3972b446a9a3f0bb3e2fb15d6c395a82",
+    "semantic_hash": "3972b446a9a3f0bb3e2fb15d6c395a82"
+  },
+  "ml/models/__init__.py": {
+    "mtime": 1790105892.6253347,
+    "seen": 1792931190.8403661,
+    "ast_hash": "744b78e7dacd72b927f6c83c21401c37",
+    "semantic_hash": "744b78e7dacd72b927f6c83c21401c37"
+  },
+  "ml/models/btc.py": {
+    "mtime": 1790960826.0722163,
+    "seen": 1792931190.8403668,
+    "ast_hash": "4f0de1647759dcd1d7111ddbfff43de0",
+    "semantic_hash": "4f0de1647759dcd1d7111ddbfff43de0"
+  },
+  "ml/models/cnn.py": {
+    "mtime": 1790105908.451265,
+    "seen": 1792931190.8403676,
+    "ast_hash": "0bfaa821f5b7c68ff27d0e24879dfcbd",
+    "semantic_hash": "0bfaa821f5b7c68ff27d0e24879dfcbd"
+  },
+  "ml/models/crnn.py": {
+    "mtime": 1790107754.129935,
+    "seen": 1792931190.8403687,
+    "ast_hash": "75b633805f8ebcae4cc70400526d803b",
+    "semantic_hash": "75b633805f8ebcae4cc70400526d803b"
+  },
+  "ml/models/heads.py": {
+    "mtime": 1790105899.1613522,
+    "seen": 1792931190.8403697,
+    "ast_hash": "aa35e02025d831ab01d54e9c39790a7f",
+    "semantic_hash": "aa35e02025d831ab01d54e9c39790a7f"
+  },
+  "ml/preprocessing/__init__.py": {
+    "mtime": 1790105652.0991397,
+    "seen": 1792931190.8403704,
+    "ast_hash": "fc901462316b5a9358a1352c36b3983c",
+    "semantic_hash": "fc901462316b5a9358a1352c36b3983c"
+  },
+  "ml/preprocessing/annotations.py": {
+    "mtime": 1791410968.4308534,
+    "seen": 1792931190.8403714,
+    "ast_hash": "778709b6f6eee68b23090941d0cf6190",
+    "semantic_hash": "778709b6f6eee68b23090941d0cf6190"
+  },
+  "ml/preprocessing/audio.py": {
+    "mtime": 1790105656.087367,
+    "seen": 1792931190.8403723,
+    "ast_hash": "436c885fff58e3ab0828cd8600010b70",
+    "semantic_hash": "436c885fff58e3ab0828cd8600010b70"
+  },
+  "ml/preprocessing/augmentation.py": {
+    "mtime": 1790960826.073722,
+    "seen": 1792931190.8403733,
+    "ast_hash": "774677e6b9fcc1a5299437984d08f206",
+    "semantic_hash": "774677e6b9fcc1a5299437984d08f206"
+  },
+  "ml/preprocessing/spectrogram.py": {
+    "mtime": 1790105826.6430056,
+    "seen": 1792931190.840374,
+    "ast_hash": "23405b08bcfd7e7b43763d064ae40d29",
+    "semantic_hash": "23405b08bcfd7e7b43763d064ae40d29"
+  },
+  "ml/training/__init__.py": {
+    "mtime": 1790105919.6555014,
+    "seen": 1792931190.840375,
+    "ast_hash": "403fab028567f4b011702a7b0c6df14e",
+    "semantic_hash": "403fab028567f4b011702a7b0c6df14e"
+  },
+  "ml/training/callbacks.py": {
+    "mtime": 1790105935.0979438,
+    "seen": 1792931190.840376,
+    "ast_hash": "3ef6f9d77fccf348299bd33944d28a13",
+    "semantic_hash": "3ef6f9d77fccf348299bd33944d28a13"
+  },
+  "ml/training/losses.py": {
+    "mtime": 1790105925.6100543,
+    "seen": 1792931190.8403769,
+    "ast_hash": "7b2e439c5cea6781dd5c19393b2204fb",
+    "semantic_hash": "7b2e439c5cea6781dd5c19393b2204fb"
+  },
+  "ml/training/train.py": {
+    "mtime": 1790436671.262652,
+    "seen": 1792931190.8403776,
+    "ast_hash": "384f4b1e0677b128ab868c5d6929f896",
+    "semantic_hash": "384f4b1e0677b128ab868c5d6929f896"
+  },
+  "packages/music-core/__init__.py": {
+    "mtime": 1790105584.174903,
+    "seen": 1792931190.8403785,
+    "ast_hash": "dec9f1f93e21c4985464dff09b918d78",
+    "semantic_hash": "dec9f1f93e21c4985464dff09b918d78"
+  },
+  "packages/music-core/analysis.py": {
+    "mtime": 1790960826.0752068,
+    "seen": 1792931190.8403795,
+    "ast_hash": "e791d7701d46185a010a6f0d0c4b3f17",
+    "semantic_hash": "e791d7701d46185a010a6f0d0c4b3f17"
+  },
+  "packages/music-core/guitar_chords.py": {
+    "mtime": 1790960826.0757103,
+    "seen": 1792931190.8403804,
+    "ast_hash": "8786fc80f1fc9c48afa0719891e3c977",
+    "semantic_hash": "8786fc80f1fc9c48afa0719891e3c977"
+  },
+  "packages/music-core/midi.py": {
+    "mtime": 1791743591.8080845,
+    "seen": 1792931190.8403811,
+    "ast_hash": "2789230b6f4d9ebec4bcd7baa983e7d3",
+    "semantic_hash": "2789230b6f4d9ebec4bcd7baa983e7d3"
+  },
+  "packages/music-core/musicxml.py": {
+    "mtime": 1791410951.4206543,
+    "seen": 1792931190.840382,
+    "ast_hash": "fd0e20655f9c357967eafb518fb233c8",
+    "semantic_hash": "fd0e20655f9c357967eafb518fb233c8"
+  },
+  "packages/music-core/notes.py": {
+    "mtime": 1791410951.4206543,
+    "seen": 1792931190.840383,
+    "ast_hash": "76ad2703289380e4ed1a04a49a546177",
+    "semantic_hash": "76ad2703289380e4ed1a04a49a546177"
+  },
+  "packages/music-core/rhythm.py": {
+    "mtime": 1790960826.0788968,
+    "seen": 1792931190.840384,
+    "ast_hash": "56fe631743fd1b0908dc75be78a2b78b",
+    "semantic_hash": "56fe631743fd1b0908dc75be78a2b78b"
+  },
+  "packages/music-core/tab.py": {
+    "mtime": 1791410951.4216542,
+    "seen": 1792931190.8403847,
+    "ast_hash": "0c97c3b706398eff2407097897f37674",
+    "semantic_hash": "0c97c3b706398eff2407097897f37674"
+  },
+  "packages/music-core/timing.py": {
+    "mtime": 1790960826.0799007,
+    "seen": 1792931190.8403857,
+    "ast_hash": "d4a85c14e0f1ca3aecb262ff8f7ef687",
+    "semantic_hash": "d4a85c14e0f1ca3aecb262ff8f7ef687"
+  },
+  "packages/shared-types/index.ts": {
+    "mtime": 1791410951.4226594,
+    "seen": 1792931190.8403866,
+    "ast_hash": "d6404690d3e55f5640b5667c8e9d7f4e",
+    "semantic_hash": "d6404690d3e55f5640b5667c8e9d7f4e"
+  },
+  "packages/shared-types/package.json": {
+    "mtime": 1790105627.1873865,
+    "seen": 1792931190.8403873,
+    "ast_hash": "3c65db7ae35cd8fd3646fec6b7e8fcd1",
+    "semantic_hash": "3c65db7ae35cd8fd3646fec6b7e8fcd1"
+  },
+  "pyproject.toml": {
+    "mtime": 1790960826.081281,
+    "seen": 1792931190.8403883,
+    "ast_hash": "0449df5a34e8859ec612a09d9487f30e",
+    "semantic_hash": "0449df5a34e8859ec612a09d9487f30e"
+  },
+  "scripts/align_egdb.py": {
+    "mtime": 1790960826.0823753,
+    "seen": 1792931190.840389,
+    "ast_hash": "08d8d3afb35626febc9adf933904148a",
+    "semantic_hash": "08d8d3afb35626febc9adf933904148a"
+  },
+  "scripts/benchmark_chords.py": {
+    "mtime": 1790960826.0823753,
+    "seen": 1792931190.84039,
+    "ast_hash": "ab3b1e553a21fb27b44138c4d198d1fc",
+    "semantic_hash": "ab3b1e553a21fb27b44138c4d198d1fc"
+  },
+  "scripts/benchmark_datasets.py": {
+    "mtime": 1790960826.0838788,
+    "seen": 1792931190.840391,
+    "ast_hash": "52234eef3ea1f0b52bee25cd2ac51291",
+    "semantic_hash": "52234eef3ea1f0b52bee25cd2ac51291"
+  },
+  "scripts/benchmark_grid.py": {
+    "mtime": 1790960826.0838788,
+    "seen": 1792931190.8403916,
+    "ast_hash": "bf926894ca0fd4fd31375d596699858b",
+    "semantic_hash": "bf926894ca0fd4fd31375d596699858b"
+  },
+  "scripts/benchmark_keys.py": {
+    "mtime": 1790960826.08514,
+    "seen": 1792931190.8403926,
+    "ast_hash": "a5bb84b8a17bd94019205698a3ab9bb3",
+    "semantic_hash": "a5bb84b8a17bd94019205698a3ab9bb3"
+  },
+  "scripts/benchmark_robustness.py": {
+    "mtime": 1790175470.7268703,
+    "seen": 1792931190.8403935,
+    "ast_hash": "92769040710eeea8df0fd0b3eed6f5ec",
+    "semantic_hash": "92769040710eeea8df0fd0b3eed6f5ec"
+  },
+  "scripts/benchmark_strums.py": {
+    "mtime": 1790960826.085643,
+    "seen": 1792931190.8403943,
+    "ast_hash": "7cfc5e573a6baefb037810e3fba73c87",
+    "semantic_hash": "7cfc5e573a6baefb037810e3fba73c87"
+  },
+  "scripts/benchmark_techniques.py": {
+    "mtime": 1791478994.2704825,
+    "seen": 1792931190.8403952,
+    "ast_hash": "f33861582be5e1b6b45396aa7a2a5b12",
+    "semantic_hash": "f33861582be5e1b6b45396aa7a2a5b12"
+  },
+  "scripts/benchmark_tunings.py": {
+    "mtime": 1790437487.7470038,
+    "seen": 1792931190.840396,
+    "ast_hash": "21c4ec3bc1ae8bd5833ed7bc6ce7b933",
+    "semantic_hash": "21c4ec3bc1ae8bd5833ed7bc6ce7b933"
+  },
+  "scripts/benchmark_voice.py": {
+    "mtime": 1790612569.6996748,
+    "seen": 1792931190.8403971,
+    "ast_hash": "76b077c2c5a6dab0cd7ea8e5423b8c23",
+    "semantic_hash": "76b077c2c5a6dab0cd7ea8e5423b8c23"
+  },
+  "scripts/download_aam.py": {
+    "mtime": 1790960826.0862775,
+    "seen": 1792931190.8403978,
+    "ast_hash": "dfea986b59a7df8c5a3542ff505a0085",
+    "semantic_hash": "dfea986b59a7df8c5a3542ff505a0085"
+  },
+  "scripts/download_dataset.py": {
+    "mtime": 1790140980.3393183,
+    "seen": 1792931190.8403988,
+    "ast_hash": "c75388d956e9a017c874f6a18337fefb",
+    "semantic_hash": "c75388d956e9a017c874f6a18337fefb"
+  },
+  "scripts/download_egdb.py": {
+    "mtime": 1790282946.3338337,
+    "seen": 1792931190.8403995,
+    "ast_hash": "c7a35f6cf7a81999aff5555c9d8e9b07",
+    "semantic_hash": "c7a35f6cf7a81999aff5555c9d8e9b07"
+  },
+  "scripts/download_guitar_techs.py": {
+    "mtime": 1790287776.5665503,
+    "seen": 1792931190.8404007,
+    "ast_hash": "602aeb9904e5a3dec99756ee4a333212",
+    "semantic_hash": "602aeb9904e5a3dec99756ee4a333212"
+  },
+  "scripts/evaluate.py": {
+    "mtime": 1790106636.888988,
+    "seen": 1792931190.8404014,
+    "ast_hash": "520e6daadf194ad7e0062192fcda6b87",
+    "semantic_hash": "520e6daadf194ad7e0062192fcda6b87"
+  },
+  "scripts/mix_splits.py": {
+    "mtime": 1790960826.0876791,
+    "seen": 1792931190.8404024,
+    "ast_hash": "aba13d775da6ca5f97b864d93fd8aecf",
+    "semantic_hash": "aba13d775da6ca5f97b864d93fd8aecf"
+  },
+  "scripts/prepare_dataset.py": {
+    "mtime": 1790960826.0876791,
+    "seen": 1792931190.8404033,
+    "ast_hash": "fe7809bce8d72b57ac0e91d12ff74d6f",
+    "semantic_hash": "fe7809bce8d72b57ac0e91d12ff74d6f"
+  },
+  "scripts/train.py": {
+    "mtime": 1790106636.8909893,
+    "seen": 1792931190.8404043,
+    "ast_hash": "2f6af7025c4b9ca336504265215bd778",
+    "semantic_hash": "2f6af7025c4b9ca336504265215bd778"
+  },
+  "scripts/tune_tab.py": {
+    "mtime": 1790114589.509279,
+    "seen": 1792931190.840405,
+    "ast_hash": "ee71a9ea327c7626bc54ab2dcf2f6adc",
+    "semantic_hash": "ee71a9ea327c7626bc54ab2dcf2f6adc"
+  },
+  "scripts/tune_thresholds.py": {
+    "mtime": 1790319608.7144666,
+    "seen": 1792931190.840406,
+    "ast_hash": "aade0b428d5d2d74a4be8676637b9841",
+    "semantic_hash": "aade0b428d5d2d74a4be8676637b9841"
+  },
+  "tests/fixtures/music_web.json": {
+    "mtime": 1791743743.575004,
+    "seen": 1792931190.840407,
+    "ast_hash": "a02c0506cd676ce94f2aaabaf6485d87",
+    "semantic_hash": "a02c0506cd676ce94f2aaabaf6485d87"
+  },
+  "tests/test_analysis.py": {
+    "mtime": 1790267545.0379665,
+    "seen": 1792931190.8404078,
+    "ast_hash": "02cf3e45a9c16373b1a225982cb4fa98",
+    "semantic_hash": "02cf3e45a9c16373b1a225982cb4fa98"
+  },
+  "tests/test_annotations.py": {
+    "mtime": 1790106353.45787,
+    "seen": 1792931190.8404086,
+    "ast_hash": "aca0fca492e1dd67eb280ade4f3d8b37",
+    "semantic_hash": "aca0fca492e1dd67eb280ade4f3d8b37"
+  },
+  "tests/test_api.py": {
+    "mtime": 1791410968.4308534,
+    "seen": 1792931190.8404095,
+    "ast_hash": "e644eb9425e742d94a84fcf26360cf48",
+    "semantic_hash": "e644eb9425e742d94a84fcf26360cf48"
+  },
+  "tests/test_augmentation.py": {
+    "mtime": 1790175529.6908617,
+    "seen": 1792931190.8404105,
+    "ast_hash": "7aac951ae748daf72ca3ea497fc0d8e1",
+    "semantic_hash": "7aac951ae748daf72ca3ea497fc0d8e1"
+  },
+  "tests/test_extra_datasets.py": {
+    "mtime": 1790318975.1782537,
+    "seen": 1792931190.8404114,
+    "ast_hash": "d11153838bef2c15d2984626c5883243",
+    "semantic_hash": "d11153838bef2c15d2984626c5883243"
+  },
+  "tests/test_grid_rhythm_keys.py": {
+    "mtime": 1790963440.024551,
+    "seen": 1792931190.8404121,
+    "ast_hash": "545c917590ba4d36877b003576165b98",
+    "semantic_hash": "545c917590ba4d36877b003576165b98"
+  },
+  "tests/test_guitar_chords.py": {
+    "mtime": 1790960826.0915701,
+    "seen": 1792931190.8404129,
+    "ast_hash": "8d3716d085b3cc4d19adfc21c7e802ee",
+    "semantic_hash": "8d3716d085b3cc4d19adfc21c7e802ee"
+  },
+  "tests/test_idmt.py": {
+    "mtime": 1791479346.0886931,
+    "seen": 1792931190.840414,
+    "ast_hash": "9f6b8b24df2c5292ebdf9f1ae2f5760e",
+    "semantic_hash": "9f6b8b24df2c5292ebdf9f1ae2f5760e"
+  },
+  "tests/test_midi.py": {
+    "mtime": 1791741031.6154642,
+    "seen": 1792931190.8404148,
+    "ast_hash": "d8c335bc246da69fde57772c8b50b2cb",
+    "semantic_hash": "d8c335bc246da69fde57772c8b50b2cb"
+  },
+  "tests/test_model.py": {
+    "mtime": 1790174864.528777,
+    "seen": 1792931190.8404157,
+    "ast_hash": "ab683c814f6ce82bd8c951041f1f493f",
+    "semantic_hash": "ab683c814f6ce82bd8c951041f1f493f"
+  },
+  "tests/test_musicxml.py": {
+    "mtime": 1791410968.4308534,
+    "seen": 1792931190.8404164,
+    "ast_hash": "033cc36a60a0078469809d70e2c4b7c1",
+    "semantic_hash": "033cc36a60a0078469809d70e2c4b7c1"
+  },
+  "tests/test_notes.py": {
+    "mtime": 1790106336.5865953,
+    "seen": 1792931190.8404174,
+    "ast_hash": "c3f3cd7fabf3eae318a48b7de9147ade",
+    "semantic_hash": "c3f3cd7fabf3eae318a48b7de9147ade"
+  },
+  "tests/test_postprocess.py": {
+    "mtime": 1790174847.945971,
+    "seen": 1792931190.8404183,
+    "ast_hash": "149cd25c3a6a9d1be082d42bcd1bc858",
+    "semantic_hash": "149cd25c3a6a9d1be082d42bcd1bc858"
+  },
+  "tests/test_robustness.py": {
+    "mtime": 1790140924.1296098,
+    "seen": 1792931190.8404193,
+    "ast_hash": "6a3a1800908299b4c44ea3a3c47a0011",
+    "semantic_hash": "6a3a1800908299b4c44ea3a3c47a0011"
+  },
+  "tests/test_tab.py": {
+    "mtime": 1791410951.4256542,
+    "seen": 1792931190.84042,
+    "ast_hash": "cae6a4ec336537b8503cafeb7466475c",
+    "semantic_hash": "cae6a4ec336537b8503cafeb7466475c"
+  },
+  "tests/test_techniques.py": {
+    "mtime": 1791477807.071239,
+    "seen": 1792931190.8404212,
+    "ast_hash": "837261110cb0a7b6f01d42b69318a4ea",
+    "semantic_hash": "837261110cb0a7b6f01d42b69318a4ea"
+  },
+  "tests/test_voice.py": {
+    "mtime": 1790960826.0925741,
+    "seen": 1792931190.840422,
+    "ast_hash": "3ef3667ac00490fb5a965727ef6dd1d1",
+    "semantic_hash": "3ef3667ac00490fb5a965727ef6dd1d1"
+  },
+  "tests/test_web_fixtures.py": {
+    "mtime": 1791743741.3419025,
+    "seen": 1792931190.8404229,
+    "ast_hash": "00243ca581cb442ff03a2554d33de2e8",
+    "semantic_hash": "00243ca581cb442ff03a2554d33de2e8"
+  },
+  "README.md": {
+    "mtime": 1791743928.1952484,
+    "seen": 1792931190.8404236,
+    "ast_hash": "83de01515be2effe381db226051c5548",
+    "semantic_hash": "83de01515be2effe381db226051c5548"
+  },
+  "apps/api/requirements.txt": {
+    "mtime": 1790140850.342758,
+    "seen": 1792931190.8404248,
+    "ast_hash": "d6553ae89ddd125008e470f6bb6ab15b",
+    "semantic_hash": "d6553ae89ddd125008e470f6bb6ab15b"
+  }
+}
