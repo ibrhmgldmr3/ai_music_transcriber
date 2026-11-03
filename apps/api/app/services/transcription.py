@@ -35,6 +35,7 @@ def get_predictor():
         settings.model_checkpoint,
         device=settings.model_device,
         tab_checkpoint=settings.model_tab_checkpoint,
+        technique_classifier=settings.technique_classifier,
     )
 
 
@@ -47,7 +48,8 @@ GUITAR_METHOD = "beats-btc-tech@2"
 @lru_cache(maxsize=1)
 def model_version() -> str:
     """The installed models and method, e.g.
-    ``guitar_v10@1a2b3c4d+guitar_v7@5e6f7a8b+beats-btc-tech@2``.
+    ``guitar_v10@1a2b3c4d+guitar_v7@5e6f7a8b+beats-btc-tech@2`` (with a technique
+    classifier: ``...+techniques@9a8b7c6d+beats-btc-tech@2``).
 
     Checkpoint folder plus a fingerprint of the file (size and modification time), so a
     retrained or replaced model gets a new version. Cached like the predictor: both
@@ -56,6 +58,8 @@ def model_version() -> str:
     paths = [settings.model_checkpoint]
     if settings.model_tab_checkpoint:
         paths.append(settings.model_tab_checkpoint)
+    if settings.technique_classifier:
+        paths.append(settings.technique_classifier)
     return "+".join([*(_fingerprint(path) for path in paths), GUITAR_METHOD])
 
 

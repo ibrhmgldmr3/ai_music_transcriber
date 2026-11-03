@@ -33,14 +33,19 @@ class Settings(BaseSettings):
     model_checkpoint: Path = REPO_ROOT / "ml" / "checkpoints" / "guitar" / "best.pt"
     # Optional second model whose tab head places notes on strings/frets.
     model_tab_checkpoint: Path | None = None
+    # Optional learned bend/vibrato decisions (scripts/train_technique_classifier.py);
+    # unset, the rules in ml/inference/techniques.py decide.
+    technique_classifier: Path | None = None
     model_device: str | None = None  # auto | cpu | cuda
 
-    @field_validator("model_tab_checkpoint", mode="before")
+    @field_validator("model_tab_checkpoint", "technique_classifier", mode="before")
     @classmethod
     def _empty_means_none(cls, value: object) -> object:
         return None if value == "" else value  # MODEL_TAB_CHECKPOINT= disables it
 
-    @field_validator("storage_dir", "model_checkpoint", "model_tab_checkpoint")
+    @field_validator(
+        "storage_dir", "model_checkpoint", "model_tab_checkpoint", "technique_classifier"
+    )
     @classmethod
     def _anchor_to_repo(cls, path: Path | None) -> Path | None:
         if path is None:

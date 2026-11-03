@@ -22,7 +22,16 @@ onset (50 ms). ``--set name=value`` overrides a ``TechniqueSettings`` field,
 ``ml/configs/guitar_contour.yaml``) instead of the harmonic sum. On GuitarSet the report
 also gives the curve's error against the pickup on the reference notes' frames.
 
+``--classifier`` decides bends and vibrato with a learned model
+(``ml.inference.technique_classifier``) instead of the rules. ``--dump`` (IDMT) writes
+every note's bend and vibrato features with its label, to train one with
+``scripts/train_technique_classifier.py``.
+
     python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model
+    python scripts/benchmark_techniques.py --dataset idmt --guitars AR FS --notes model \
+        --dump ml/data/interim/technique_features/arfs_model.npz
+    python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model \
+        --classifier ml/checkpoints/techniques/classifier.json
     python scripts/benchmark_techniques.py --dataset guitarset --players 05
     python scripts/benchmark_techniques.py --dataset guitarset --players 05 --tracker contour
 """
@@ -39,7 +48,14 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from ml.datasets.idmt import GUITARS, find_takes, load_annotation
+from ml.datasets.idmt import GUITARS, IdmtNote, find_takes, load_annotation
+from ml.inference.technique_classifier import (
+    BEND_FEATURES,
+    VIBRATO_FEATURES,
+    TechniqueClassifier,
+    bend_candidate,
+    vibrato_features,
+)
 from ml.inference.techniques import (
     ContourTracker,
     PitchTracker,
@@ -105,19 +121,123 @@ def curve_errors(
     return errors
 
 
-def curve_labels(curve: np.ndarray, pitch: int, rate: float, s: TechniqueSettings) -> dict:
+def curve_labels(
+    curve: np.ndarray,
+    pitch: int,
+    rate: float,
+    s: TechniqueSettings,
+    classifier: TechniqueClassifier | None = None,
+) -> dict:
+    if classifier is not None:
+        bend = classifier.bend(curve, pitch, rate, s)
+        return {
+            "bend": bend.amount if bend else None,
+            "vibrato": classifier.vibrato(curve, rate, s),
+        }
     bend = find_bend(curve, pitch, rate, s)
     return {"bend": bend.amount if bend else None, "vibrato": has_vibrato(curve, rate, s)}
 
 
-def own_note_labels(notes: Sequence[Note], tracker: PitchTracker) -> list[dict]:
+def own_note_labels(
+    notes: Sequence[Note],
+    tracker: PitchTracker,
+    classifier: TechniqueClassifier | None = None,
+    trace: list | None = None,
+) -> list[dict]:
     """Bend and vibrato of each note on the curve followed in the recording."""
     result = []
-    for note in notes:
+    for i, note in enumerate(notes):
         others = [n for n in notes if n is not note and n.end > note.start and n.start < note.end]
         curve = tracker.note_curve(note, others).midi
-        result.append(curve_labels(curve, note.pitch, tracker.frame_rate, tracker.s))
+        result.append(curve_labels(curve, note.pitch, tracker.frame_rate, tracker.s, classifier))
+        if trace is not None:
+            trace.append(
+                {
+                    "index": i,
+                    "bend": [(curve, note.pitch)],
+                    "vibrato": curve,
+                    "frame_rate": tracker.frame_rate,
+                }
+            )
     return result
+
+
+class FeatureDump:
+    """Bend and vibrato features of every note with its IDMT label, for
+    ``scripts/train_technique_classifier.py``. Bend rows are the loose rule's candidates
+    (a note cut short may give two: ``note`` tells them apart); notes without one can't
+    be bent by a classifier but count in ``positives``."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, list] = {"vibrato": [], "bend": []}
+        self.positives: Counter = Counter()
+
+    def add(
+        self,
+        take: str,
+        trace: Sequence[dict],
+        labels: Sequence[str],
+        reference: Sequence[IdmtNote],
+        s: TechniqueSettings,
+    ) -> None:
+        """``labels``: the expression each traced note is taken to have."""
+        for code in ("BE", "VI"):
+            self.positives[code] += sum(n.expression == code for n in reference)
+        for entry in trace:
+            i, rate = entry["index"], entry["frame_rate"]
+            label = labels[i]
+            features = vibrato_features(entry["vibrato"], rate, s)
+            if features is not None:
+                self.rows["vibrato"].append((take, i, label == "VI", features))
+            for curve, pitch in entry["bend"]:
+                candidate = bend_candidate(curve, pitch, rate, s)
+                if candidate is not None:
+                    self.rows["bend"].append((take, i, label == "BE", candidate[1]))
+
+    def save(self, path: Path, info: dict) -> None:
+        arrays = {}
+        for kind, names in (("vibrato", VIBRATO_FEATURES), ("bend", BEND_FEATURES)):
+            rows = self.rows[kind]
+            arrays[f"{kind}_take"] = np.array([r[0] for r in rows], dtype=str)
+            arrays[f"{kind}_note"] = np.array([r[1] for r in rows], dtype=int)
+            arrays[f"{kind}_label"] = np.array([r[2] for r in rows], dtype=bool)
+            arrays[f"{kind}_X"] = (
+                np.stack([r[3] for r in rows]) if rows else np.zeros((0, len(names)))
+            )
+            arrays[f"{kind}_features"] = np.array(names, dtype=str)
+        arrays["positives_bend"] = np.array(self.positives["BE"])
+        arrays["positives_vibrato"] = np.array(self.positives["VI"])
+        arrays["info"] = np.array(json.dumps(info))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(path, **arrays)
+        print(
+            f"wrote {path}: {len(self.rows['vibrato'])} vibrato rows, "
+            f"{len(self.rows['bend'])} bend candidates "
+            f"(labeled: {self.positives['VI']} vibrato, {self.positives['BE']} bends)"
+        )
+
+
+def estimate_labels(
+    labeled: Sequence[IdmtNote], estimate: Sequence[Note], pairs: dict, tolerance: float = 0.05
+) -> list[str]:
+    """The expression each transcribed note is taken to have: its matched reference
+    note's; else, a reference note starting within ``tolerance`` and up to three
+    semitones away (a bent note named after its bent pitch); else normal (a note the
+    transcription made up)."""
+    labels = ["NO"] * len(estimate)
+    matched = {j: i for i, j in pairs.items()}
+    for j, note in enumerate(estimate):
+        if j in matched:
+            labels[j] = labeled[matched[j]].expression
+            continue
+        near = [
+            (abs(r.note.start - note.start), r.expression)
+            for r in labeled
+            if abs(r.note.start - note.start) <= tolerance and abs(r.note.pitch - note.pitch) <= 3
+        ]
+        if near:
+            labels[j] = min(near)[1]
+    return labels
 
 
 def transcribe(dataset: str, take: str, y: np.ndarray, args: argparse.Namespace) -> list[Note]:
@@ -182,15 +302,23 @@ def score(counts: Counter, name: str, ref_on: set, est_on: set, hits: set) -> No
     counts[name, "hit"] += len(hits)
 
 
-def run_idmt(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) -> None:
+def run_idmt(
+    args: argparse.Namespace,
+    s: TechniqueSettings,
+    counts: Counter,
+    classifier: TechniqueClassifier | None = None,
+    dump: FeatureDump | None = None,
+) -> None:
     for take in tqdm(find_takes(guitars=tuple(args.guitars))):
         y = load_audio(take.audio_path, SAMPLE_RATE)
         labeled = load_annotation(take.annotation_path)
         reference = [n.note for n in labeled]
+        trace: list | None = [] if dump is not None else None
         if args.notes == "reference":
             estimate = reference
-            est_labels = own_note_labels(reference, make_tracker(y, s, args))
+            est_labels = own_note_labels(reference, make_tracker(y, s, args), classifier, trace)
             pairs = {i: i for i in range(len(reference))}
+            note_labels = [n.expression for n in labeled]
         else:
             estimate = detect_techniques(
                 transcribe("idmt", take.name, y, args),
@@ -199,11 +327,16 @@ def run_idmt(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) ->
                 s,
                 STANDARD_TUNING,
                 tracker=make_tracker(y, s, args),
+                classifier=classifier,
+                trace=trace,
             )
             est_labels = [{"bend": n.bend, "vibrato": n.vibrato} for n in estimate]
             pairs = match(reference, estimate)
             counts["notes_ref"] += len(reference)
             counts["notes_matched"] += len(pairs)
+            note_labels = estimate_labels(labeled, estimate, pairs)
+        if dump is not None:
+            dump.add(take.name, trace, note_labels, labeled, s)
 
         for name, code in EXPRESSION_OF.items():
             ref_on = {i for i, n in enumerate(labeled) if n.expression == code}
@@ -236,7 +369,11 @@ def run_idmt(args: argparse.Namespace, s: TechniqueSettings, counts: Counter) ->
 
 
 def run_guitarset(
-    args: argparse.Namespace, s: TechniqueSettings, counts: Counter, errors: list | None = None
+    args: argparse.Namespace,
+    s: TechniqueSettings,
+    counts: Counter,
+    errors: list | None = None,
+    classifier: TechniqueClassifier | None = None,
 ) -> None:
     pattern = "*.jams" if args.mode == "all" else f"*_{args.mode}.jams"
     for jams in tqdm(sorted((GUITARSET / "annotation").glob(pattern))):
@@ -258,11 +395,13 @@ def run_guitarset(
             for n in reference
         ]
         if args.notes == "reference":
-            est_labels = own_note_labels(reference, tracker)
+            est_labels = own_note_labels(reference, tracker, classifier)
             pairs = {i: i for i in range(len(reference))}
         else:
             notes = transcribe("guitarset", jams.stem, y, args)
-            estimate = detect_techniques(notes, y, SAMPLE_RATE, s, STANDARD_TUNING, tracker=tracker)
+            estimate = detect_techniques(
+                notes, y, SAMPLE_RATE, s, STANDARD_TUNING, tracker=tracker, classifier=classifier
+            )
             est_labels = [{"bend": n.bend, "vibrato": n.vibrato} for n in estimate]
             pairs = match(reference, estimate)
             counts["notes_ref"] += len(reference)
@@ -346,15 +485,32 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--contour-checkpoint", default="ml/checkpoints/guitar_contour5/best.pt")
     parser.add_argument("--set", nargs="*", default=[], metavar="NAME=VALUE")
     parser.add_argument("--inference", nargs="*", default=[], metavar="NAME=JSON")
+    parser.add_argument("--classifier", help="learned bend/vibrato decisions (JSON)")
+    parser.add_argument("--dump", type=Path, help="IDMT: write labeled features (.npz)")
     args = parser.parse_args(argv)
     s = settings_from(args.set)
+    classifier = TechniqueClassifier.load(args.classifier) if args.classifier else None
+    if args.dump is not None and args.dataset != "idmt":
+        raise SystemExit("--dump needs --dataset idmt (its labels)")
 
     counts: Counter = Counter()
     errors: list = []
     if args.dataset == "idmt":
-        run_idmt(args, s, counts)
+        dump = FeatureDump() if args.dump is not None else None
+        run_idmt(args, s, counts, classifier, dump)
+        if dump is not None:
+            info = {
+                "guitars": args.guitars,
+                "notes": args.notes,
+                "tracker": args.tracker,
+                "settings": args.set,
+                "inference": args.inference,
+            }
+            if args.notes == "model":
+                info["checkpoint"] = args.checkpoint
+            dump.save(args.dump, info)
     else:
-        run_guitarset(args, s, counts, errors)
+        run_guitarset(args, s, counts, errors, classifier)
     report(counts, args.dataset, args.notes, errors)
 
 

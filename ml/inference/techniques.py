@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 import librosa
 import numpy as np
@@ -31,6 +32,9 @@ from scipy import ndimage
 
 from music_core.notes import Note
 from music_core.tab import DEFAULT_NUM_FRETS
+
+if TYPE_CHECKING:
+    from ml.inference.technique_classifier import TechniqueClassifier
 
 
 @dataclass(frozen=True)
@@ -326,16 +330,23 @@ class Bend:
     rise: int = field(default=0, compare=False)  # curve frame where the bend starts
 
 
-def find_bend(
-    midi: np.ndarray, pitch: int, frame_rate: float, s: TechniqueSettings = TechniqueSettings()
-) -> Bend | None:
-    """The bend of a note, or None when it isn't bent.
+@dataclass(frozen=True)
+class BendShape:
+    """How a note's pitch curve rises from where it starts (``bend_shape``)."""
 
-    ``midi`` is the note's pitch curve and ``pitch`` the note as transcribed: the fretted
-    note, or the bent one when the bend comes quickly (the note model names a note by
-    the pitch it hears most; a fifth of IDMT's bends came out only at a higher pitch).
-    The curve then starts up to ``bend_below`` semitones lower.
-    """
+    base: float  # the start's lowest part (fractional MIDI)
+    fretted: int  # base rounded to a note
+    amount: float  # semitones above min(fretted, pitch) held for bend_hold
+    start: int  # curve frame where the rise to the held level starts
+    end: int  # ... and the first frame at 85 % of it
+    max_step: float  # largest pitch step between frames on the way (semitones)
+    rise_time: float  # seconds from start to end
+
+
+def bend_shape(
+    midi: np.ndarray, pitch: int, frame_rate: float, s: TechniqueSettings = TechniqueSettings()
+) -> BendShape | None:
+    """The measurements ``find_bend`` decides on; None when the curve is too short."""
     curve = _smooth(midi)
     n_base = max(3, int(round(s.base_window * frame_rate)))
     hold = max(3, int(round(s.bend_hold * frame_rate)))
@@ -349,18 +360,11 @@ def find_bend(
     # median of the first 40 ms was already 0.15-0.5 semitones up).
     base = float(np.nanpercentile(early, s.base_percentile))
     fretted = int(round(base))
-    if abs(base - fretted) > s.base_tolerance or not (
-        pitch - s.bend_below <= fretted <= pitch + s.bend_above
-    ):
-        return None  # starts away from any fretted note it could be bent from
-    fretted = min(fretted, pitch)
-    rise = np.nan_to_num(curve - fretted, nan=-np.inf)
+    rise = np.nan_to_num(curve - min(fretted, pitch), nan=-np.inf)
     held = ndimage.minimum_filter1d(rise, hold, mode="nearest")
     amount = float(held.max())
-    if not s.bend_min <= amount <= s.bend_max:
-        return None
-    if fretted + amount < pitch - 0.5:
-        return None  # named after a pitch it never reaches
+    if amount <= 0:
+        return BendShape(base, fretted, amount, 0, 0, np.inf, 0.0)
     # The rise that leads to the held level: from the last frame still near the fretted
     # note to the first at 85 % of the bend.
     peak = int(held.argmax())
@@ -368,12 +372,39 @@ def find_bend(
     end = int(np.argmax(reached)) if reached.any() else peak
     low = np.flatnonzero(rise[: end + 1] <= 0.15 * amount)
     start = int(low[-1]) if len(low) else 0
-    if (end - start) / frame_rate < s.bend_rise:
-        return None  # a jump to a new fretted note, not a bend
     steps = np.abs(np.diff(curve[start : end + 1]))
-    if len(steps) and np.nanmax(steps, initial=0.0) > s.bend_step * amount:
+    max_step = float(np.nanmax(steps, initial=0.0)) if len(steps) else 0.0
+    return BendShape(base, fretted, amount, start, end, max_step, (end - start) / frame_rate)
+
+
+def find_bend(
+    midi: np.ndarray, pitch: int, frame_rate: float, s: TechniqueSettings = TechniqueSettings()
+) -> Bend | None:
+    """The bend of a note, or None when it isn't bent.
+
+    ``midi`` is the note's pitch curve and ``pitch`` the note as transcribed: the fretted
+    note, or the bent one when the bend comes quickly (the note model names a note by
+    the pitch it hears most; a fifth of IDMT's bends came out only at a higher pitch).
+    The curve then starts up to ``bend_below`` semitones lower.
+    """
+    shape = bend_shape(midi, pitch, frame_rate, s)
+    if shape is None:
+        return None
+    if abs(shape.base - shape.fretted) > s.base_tolerance or not (
+        pitch - s.bend_below <= shape.fretted <= pitch + s.bend_above
+    ):
+        return None  # starts away from any fretted note it could be bent from
+    fretted = min(shape.fretted, pitch)
+    amount = shape.amount
+    if not s.bend_min <= amount <= s.bend_max:
+        return None
+    if fretted + amount < pitch - 0.5:
+        return None  # named after a pitch it never reaches
+    if shape.rise_time < s.bend_rise:
+        return None  # a jump to a new fretted note, not a bend
+    if shape.max_step > s.bend_step * amount:
         return None  # climbs fret by fret: a slide
-    return Bend(fretted, round(amount * 2) / 2, start)
+    return Bend(fretted, round(amount * 2) / 2, shape.start)
 
 
 def has_vibrato(
@@ -448,11 +479,17 @@ def detect_techniques(
     tuning: Sequence[int] | None = None,
     num_frets: int = DEFAULT_NUM_FRETS,
     tracker: PitchTracker | None = None,
+    classifier: TechniqueClassifier | None = None,
+    trace: list[dict[str, Any]] | None = None,
 ) -> list[Note]:
     """Mark slides, bends and vibrato on positioned notes (input order is kept).
 
     The pitch curves come from ``tracker`` (e.g. a ``ContourTracker``), by default a
-    harmonic-sum ``PitchTracker`` on ``y``.
+    harmonic-sum ``PitchTracker`` on ``y``. ``classifier`` decides bends and vibrato in
+    place of the rules (``ml.inference.technique_classifier``). ``trace``, if given,
+    receives one entry per note with the curves the decisions were made on, as
+    ``{"index", "bend": [(curve, pitch), ...], "vibrato": curve, "frame_rate"}`` (a
+    note cut short is tried again on a longer curve: two bend entries).
 
     A slide is played on one string, but the fingering optimizer, not knowing it, often
     put its two notes on two (4 in 10 of the slides found on IDMT): they are moved onto
@@ -492,10 +529,22 @@ def detect_techniques(
         if moved is not None:
             result[j], result[i] = moved[0], replace(moved[1], technique="slide")
 
+    def judge_bend(midi: np.ndarray, pitch: int, tried: list) -> Bend | None:
+        tried.append((midi, pitch))
+        if classifier is not None:
+            return classifier.bend(midi, pitch, tracker.frame_rate, s)
+        return find_bend(midi, pitch, tracker.frame_rate, s)
+
+    def judge_vibrato(midi: np.ndarray) -> bool:
+        if classifier is not None:
+            return classifier.vibrato(midi, tracker.frame_rate, s)
+        return has_vibrato(midi, tracker.frame_rate, s)
+
     starts = sorted(n.start for n in notes)
     for i in order:
         note, curve = result[i], curves[i]
-        bend = find_bend(curve, note.pitch, tracker.frame_rate, s)
+        tried: list = []
+        bend = judge_bend(curve, note.pitch, tried)
         if (
             bend is None
             and s.bend_extend > 0
@@ -513,7 +562,7 @@ def detect_techniques(
                     n for n in notes if n is not notes[i] and n.end > note.start and n.start < end
                 ]
                 held = tracker.note_curve(longer, others).midi - shift
-                bend = find_bend(held, note.pitch, tracker.frame_rate, s)
+                bend = judge_bend(held, note.pitch, tried)
                 if bend is not None and bend.rise >= len(curve):
                     bend = None  # the pitch only moves after the note ended
                 if bend is not None:
@@ -521,11 +570,11 @@ def detect_techniques(
         if bend is not None and bend.fretted != note.pitch:
             note = _refret(note, bend.fretted)
             bend = bend if note.pitch == bend.fretted else None
-        result[i] = replace(
-            note,
-            bend=bend.amount if bend else None,
-            vibrato=has_vibrato(curve, tracker.frame_rate, s),
-        )
+        result[i] = replace(note, bend=bend.amount if bend else None, vibrato=judge_vibrato(curve))
+        if trace is not None:
+            trace.append(
+                {"index": i, "bend": tried, "vibrato": curve, "frame_rate": tracker.frame_rate}
+            )
     return result
 
 

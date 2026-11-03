@@ -68,7 +68,7 @@ Bu tablo yalnızca GuitarSet ile eğitilmiş ilk çiftin sonuçları. Uygulaman�
 | `ml/models` | `ConvStack`, `CNN`, `CRNN` (BiLSTM/GRU), çıkış kafaları; akor tanıyıcı BTC (`btc.py`, yalnızca çıkarım) |
 | `ml/training` | eğitim döngüsü, loss, callback'ler |
 | `ml/evaluation` | frame/nota/tab metrikleri, değerlendirme, görselleştirme |
-| `ml/inference` | nota çözümleme (Onsets & Frames tarzı), `Predictor`, kanal ayırma (Demucs), ses modu (`voice.py`), akor, bas ve vuruş tanıma (`chords.py`), sesten vuruş onset'leri (`rhythm.py`), şarkı modu (`song.py`) |
+| `ml/inference` | nota çözümleme (Onsets & Frames tarzı), `Predictor`, kanal ayırma (Demucs), ses modu (`voice.py`), akor, bas ve vuruş tanıma (`chords.py`), sesten vuruş onset'leri (`rhythm.py`), şarkı modu (`song.py`), çalma teknikleri (`techniques.py`, öğrenilmiş kararlar: `technique_classifier.py`) |
 | `packages/music-core` | `Note`, MIDI, MusicXML, vuruş ızgarası (`timing.py`), tab optimizasyonu, ton/ölçü/akor analizi ve ton değişimleri (`analysis.py`), ritim kalıbı (`rhythm.py`), gitar akor şemaları, slash akorlar ve capo önerisi (`guitar_chords.py`); `music_core` olarak import edilir |
 | `packages/shared-types` | API şemalarının TypeScript karşılıkları |
 | `scripts` | veri indirme/hazırlama, eğitim, değerlendirme |
@@ -272,7 +272,7 @@ npm install
 npm run dev
 ```
 
-API ortam değişkenleri: `DATABASE_URL`, `REDIS_URL`, `USE_CELERY`, `STORAGE_DIR`, `MODEL_CHECKPOINT`, `MODEL_TAB_CHECKPOINT`, `MODEL_DEVICE`, `CORS_ORIGINS`, `MAX_UPLOAD_MB`, `MAX_AUDIO_MINUTES`, `MAX_NOTES`, `JOB_TIMEOUT_MINUTES`, `EXPOSE_DOCS`. Web için: `NEXT_PUBLIC_API_URL`. Docker Compose'da veritabanı parolası `POSTGRES_PASSWORD` ile değiştirilebilir.
+API ortam değişkenleri: `DATABASE_URL`, `REDIS_URL`, `USE_CELERY`, `STORAGE_DIR`, `MODEL_CHECKPOINT`, `MODEL_TAB_CHECKPOINT`, `TECHNIQUE_CLASSIFIER` (isteğe bağlı, bkz. [Öğrenilmiş kararlar](#öğrenilmiş-kararlar-bend-ve-vibrato-sınıflandırıcısı)), `MODEL_DEVICE`, `CORS_ORIGINS`, `MAX_UPLOAD_MB`, `MAX_AUDIO_MINUTES`, `MAX_NOTES`, `JOB_TIMEOUT_MINUTES`, `EXPOSE_DOCS`. Web için: `NEXT_PUBLIC_API_URL`. Docker Compose'da veritabanı parolası `POSTGRES_PASSWORD` ile değiştirilebilir.
 
 ## Editörde dinleme ve çalışma
 
@@ -643,6 +643,34 @@ Kalan 11 slide'ın 8'i tek perdelik kayma: tasarım gereği ölçülmüyor. Diğ
 Vibrato ve slide değişmiyor, IDMT'nin normal notalarında yeni bend yok. GuitarSet sololarında eklenen 11 bend'in 10'u, aynı pencerede pickup eğrisinde bend değil. Bunlar çoğunlukla notanın sonunda parmak kalkarken perdenin kısa bir sıçraması ve ardından gelen çınlama (13 858 eşleşen notada %0.08). Ses gücü, bend miktarı ve zamanlama bunları gerçek bend'lerden ayırmadı.
 
 `benchmark_techniques.py --notes model` artık notaları değil modelin olasılıklarını önbelleğe alıyor (`ml/data/interim/techniques/*.npz`). Böylece decoder'daki bir değişiklik modeli yeniden çalıştırmadan ölçülebiliyor; decoder ayarları `--inference onset_threshold=0.4` gibi değiştirilebiliyor.
+
+### Öğrenilmiş kararlar: bend ve vibrato sınıflandırıcısı
+
+Yukarıdaki tablo, vibratoda kaybın nota modelinde değil kuralda olduğunu gösteriyor: IDMT'nin kendi notalarıyla bile kural vibratoların yarısını kaçırıyor. Bend'de de kural az ama doğru işaretliyor. Eşikleri elle tek tek kaydırmak yerine, aynı perde eğrisini birkaç ölçümle tarif edip kararı etiketli notalarla eğitilmiş küçük bir modele bırakmak mümkün (`ml/inference/technique_classifier.py`):
+
+- **Vibrato:** en az 0.2 s duyulan her nota aday (kuralın sınırı 0.4 s; modelin notaları IDMT'ninkilerden %20–25 kısa). Özellikler: duyulan süre, yavaş seyri çıkarılmış eğrinin derinliği ve yayılımı, 4–9 Hz ve 2–4 Hz'deki düzenlilik (öz-ilinti) ve salınım hızı, saniyedeki sıfır geçişi, yavaş seyrin genişliği (bend, kayış), perdeden sapma ve kuralın kendi kararı.
+- **Bend:** kuralın gevşetilmiş hali (en az 0.4 yarım ton, yükseliş süresi ve adım şartı yok, başlangıç toleransı 0.5) bir aday öneriyor: basılan perde, miktar, yükselişin başladığı yer. Model adayı kabul ya da reddediyor. Yani model kuralın yanlış bend'lerini eleyebilir ve sıkı eşiklerin kaçırdıklarını ekleyebilir, ama gevşek kuralın hiç görmediği bir bend'i bulamaz. Özellikler: miktar, başlangıcın perdeye uzaklığı, yazılan perdeyle ilişkisi, yükseliş süresi, en büyük adımın miktara oranı, yükselişin başladığı an, duyulan süre, vibrato derinliği ve kuralın kararı.
+- **Model:** lojistik regresyon ya da gradient-boosted ağaçlar; seçim ve karar eşiği çekim bazında gruplanmış çapraz doğrulamayla (bir çekimin notaları hem eğitimde hem ölçümde olmuyor). Skor, etiketli notaların tamamı üzerinden F: gevşek kuralın aday bulmadığı bend'ler kaçırılmış sayılıyor. Kuralın aynı satırlardaki skoru yanında yazıyor.
+- **Dosya:** JSON (pickle yok). Çıkarım yalnızca numpy ile; scikit-learn yalnızca eğitimde gerekiyor. Dosyada bir teknik yoksa onu kural belirliyor.
+
+**Durum: altyapı hazır, IDMT'de henüz ölçülmedi; uygulama varsayılan olarak kurallarla devam ediyor.** Sınıflandırıcı, LP gitarında kuralı geçtiği gösterilmeden varsayılan yapılmayacak. Eğitim AR ve FS gitarlarıyla, ölçüm hiç bakılmayan LP'de:
+
+```bash
+pip install -e ".[train]"   # scikit-learn
+# 1. AR+FS'de her notanın özellikleri ve etiketi (modelin notalarıyla ve IDMT'nin notalarıyla)
+python scripts/benchmark_techniques.py --dataset idmt --guitars AR FS --notes model --dump ml/data/interim/technique_features/arfs_model.npz
+python scripts/benchmark_techniques.py --dataset idmt --guitars AR FS --notes reference --dump ml/data/interim/technique_features/arfs_reference.npz
+# 2. Model ve eşik seçimi, JSON
+python scripts/train_technique_classifier.py ml/data/interim/technique_features/arfs_model.npz ml/data/interim/technique_features/arfs_reference.npz --out ml/checkpoints/techniques/classifier.json
+# 3. LP'de kurallarla ve sınıflandırıcıyla karşılaştırma
+python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model
+python scripts/benchmark_techniques.py --dataset idmt --guitars LP --notes model --classifier ml/checkpoints/techniques/classifier.json
+python scripts/benchmark_techniques.py --dataset guitarset --players 05 --classifier ml/checkpoints/techniques/classifier.json
+```
+
+Modelin notalarıyla yapılan dökümde her nota, eşleştiği IDMT notasının etiketini alıyor; tam eşleşmeyen notalar 50 ms içinde başlayan ve en çok üç yarım ton uzaktaki IDMT notasının etiketini (bükülmüş perdeden yazılmış bend'ler), o da yoksa "normal" (modelin uydurduğu notalar). GuitarSet satırı, teknik etiketi olmayan normal notalarda yanlış işaret sayısının artmadığını kontrol etmek için.
+
+Kullanmak için: API'de `TECHNIQUE_CLASSIFIER=ml/checkpoints/techniques/classifier.json` (Docker'da `.env`'e `TECHNIQUE_CLASSIFIER=/repo/ml/checkpoints/techniques/classifier.json`), komut satırında `python -m ml.inference.predict kayit.wav --technique-classifier ...`. Dosya modelin sürümüne (`model_version`) katılıyor, böylece proje listesi eski kararlarla çözülmüş projeleri işaretliyor.
 
 ## Farklı akortlar ve capo
 

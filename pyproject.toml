@@ -28,10 +28,12 @@ ml = [
 ]
 train = [
     "pyroomacoustics>=0.7",  # room microphone augmentation (simulated rooms)
+    "scikit-learn>=1.3",  # scripts/train_technique_classifier.py
 ]
 dev = [
     "pytest>=8.0",
     "ruff>=0.5",
+    "scikit-learn>=1.3",  # tests of the technique classifier's export
 ]
 
 [tool.setuptools]

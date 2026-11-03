@@ -309,6 +309,26 @@ def test_model_version_follows_the_checkpoint_file(tmp_path, monkeypatch):
         transcription.model_version.cache_clear()
 
 
+def test_model_version_names_the_technique_classifier(tmp_path, monkeypatch):
+    from app.config import settings
+
+    checkpoint = tmp_path / "guitar_vX" / "best.pt"
+    classifier = tmp_path / "techniques" / "classifier.json"
+    for path in (checkpoint, classifier):
+        path.parent.mkdir()
+        path.write_bytes(b"x")
+    monkeypatch.setattr(settings, "model_checkpoint", checkpoint)
+    monkeypatch.setattr(settings, "model_tab_checkpoint", None)
+    monkeypatch.setattr(settings, "technique_classifier", classifier)
+    transcription.model_version.cache_clear()
+    try:
+        version = transcription.model_version()
+        assert version.startswith("guitar_vX@") and "+techniques@" in version
+        assert version.endswith("+" + transcription.GUITAR_METHOD)
+    finally:
+        transcription.model_version.cache_clear()
+
+
 def test_tuning_and_capo_reach_the_model_and_the_exports(client):
     r = client.post(
         "/api/projects",

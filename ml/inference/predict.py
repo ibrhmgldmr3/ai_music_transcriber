@@ -9,7 +9,7 @@ import argparse
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -22,6 +22,9 @@ from ml.preprocessing.spectrogram import compute_features
 from music_core.analysis import refine_tempo
 from music_core.notes import Note
 from music_core.tab import assign_tab
+
+if TYPE_CHECKING:
+    from ml.inference.technique_classifier import TechniqueClassifier
 
 DEFAULT_CHECKPOINT = Path("ml/checkpoints/guitar/best.pt")
 
@@ -71,8 +74,11 @@ class Predictor:
         device: str | None = None,
         tab_model: nn.Module | None = None,
         tab_cfg: dict[str, Any] | None = None,
+        technique_classifier: TechniqueClassifier | None = None,
     ):
         self.cfg = cfg
+        # Learned bend/vibrato decisions in place of the rules (None: the rules).
+        self.technique_classifier = technique_classifier
         self.device = resolve_device(device)
         self.model = model.to(self.device).eval()
         self.tab_model = tab_model.to(self.device).eval() if tab_model is not None else None
@@ -89,12 +95,18 @@ class Predictor:
         path: str | Path,
         device: str | None = None,
         tab_checkpoint: str | Path | None = None,
+        technique_classifier: str | Path | None = None,
     ) -> Predictor:
         model, cfg = _load(path)
         tab_model, tab_cfg = _load(tab_checkpoint) if tab_checkpoint else (None, None)
         if tab_cfg is not None and "tab" not in tab_cfg["model"]["heads"]:
             raise ValueError(f"{tab_checkpoint} has no tab head")
-        return cls(model, cfg, device, tab_model, tab_cfg)
+        classifier = None
+        if technique_classifier:
+            from ml.inference.technique_classifier import TechniqueClassifier
+
+            classifier = TechniqueClassifier.load(technique_classifier)
+        return cls(model, cfg, device, tab_model, tab_cfg, classifier)
 
     @property
     def frame_rate(self) -> float:
@@ -235,7 +247,13 @@ class Predictor:
         if techniques and self.cfg.get("tab"):
             from ml.inference.techniques import detect_techniques
 
-            notes = detect_techniques(notes, y, sr, tuning=list(tuning or self.tuning))
+            notes = detect_techniques(
+                notes,
+                y,
+                sr,
+                tuning=list(tuning or self.tuning),
+                classifier=self.technique_classifier,
+            )
         tempo = _estimate_tempo(probs, y, sr, audio["hop_length"]) if estimate_tempo else None
         if tempo is not None:
             # The bar grid (MusicXML, editor) needs a much finer tempo than the estimate.
@@ -295,10 +313,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--midi", type=Path, help="write a MIDI file")
     parser.add_argument("--tab", type=Path, help="write ASCII tablature")
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--technique-classifier",
+        type=Path,
+        help="learned bend/vibrato decisions (scripts/train_technique_classifier.py)",
+    )
     args = parser.parse_args(argv)
 
     predictor = Predictor.from_checkpoint(
-        args.checkpoint, device=args.device, tab_checkpoint=args.tab_checkpoint
+        args.checkpoint,
+        device=args.device,
+        tab_checkpoint=args.tab_checkpoint,
+        technique_classifier=args.technique_classifier,
     )
     separator = None
     if args.separate:
