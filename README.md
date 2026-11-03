@@ -653,7 +653,34 @@ Yukarıdaki tablo, vibratoda kaybın nota modelinde değil kuralda olduğunu gö
 - **Model:** lojistik regresyon ya da gradient-boosted ağaçlar; seçim ve karar eşiği çekim bazında gruplanmış çapraz doğrulamayla (bir çekimin notaları hem eğitimde hem ölçümde olmuyor). Skor, etiketli notaların tamamı üzerinden F: gevşek kuralın aday bulmadığı bend'ler kaçırılmış sayılıyor. Kuralın aynı satırlardaki skoru yanında yazıyor.
 - **Dosya:** JSON (pickle yok). Çıkarım yalnızca numpy ile; scikit-learn yalnızca eğitimde gerekiyor. Dosyada bir teknik yoksa onu kural belirliyor.
 
-**Durum: altyapı hazır, IDMT'de henüz ölçülmedi; uygulama varsayılan olarak kurallarla devam ediyor.** Sınıflandırıcı, LP gitarında kuralı geçtiği gösterilmeden varsayılan yapılmayacak. Eğitim AR ve FS gitarlarıyla, ölçüm hiç bakılmayan LP'de:
+**İlk sonuç: hiç bakılmayan LP gitarında iki teknikte de kuraldan iyi; varsayılan yapılmadan önce yanlış işaretler kontrol ediliyor.** Eğitim AR ve FS gitarlarıyla (modelin notalarıyla ve IDMT'nin notalarıyla yapılan iki döküm birlikte), ölçüm LP'de.
+
+AR+FS çapraz doğrulaması (çekim bazında 5 kat; aynı satırlarda kural):
+
+| AR+FS, çapraz doğrulama | Kural: P / R / F | Seçilen model | Model: P / R / F |
+|---|---|---|---|
+| Vibrato (216 etiketli nota) | 0.867 / 0.454 / 0.596 | lojistik, C 0.1, eşik 0.85 | 0.872 / 0.597 / **0.709** |
+| Bend (228 etiketli nota) | 0.887 / 0.588 / 0.707 | ağaçlar, derinlik 3, 300 ağaç, eşik 0.40 | 0.915 / 0.711 / **0.800** |
+
+Vibratoda yedi modelin hepsi F 0.70–0.71'de, en basiti seçildi. Bend'de ağaçlar lojistik regresyondan belirgin şekilde iyi (0.78–0.80'e 0.70–0.71): kabul sınırı tek bir doğru değil. Etiketli vibrato notalarının %91'i, bend'lerin %81'i aday satırı veriyor; kalanını hiçbir eşik bulamaz.
+
+IDMT LP, modelin notalarıyla (uygulamanın yaptığı; V10 + V7, harmonik toplam):
+
+| IDMT LP | Bend P / R / F | Vibrato P / R / F | Slide P / R / F |
+|---|---|---|---|
+| Kurallar | 0.78 / 0.25 / 0.37 | 0.82 / 0.33 / 0.47 | 0.83 / 0.14 / 0.24 |
+| **Sınıflandırıcı** | 0.76 / 0.33 / **0.46** | 0.79 / 0.48 / **0.60** | 0.83 / 0.14 / 0.23 |
+
+Bend'de 57'nin 19'u (kuralla 14), vibratoda 54'ün 26'sı (kuralla 18) bulunuyor; kesinlik 2–3 puan düşüyor. Slide kuralı değişmedi. Normal notaların hemen hiçbiri işaretlenmiyor (1027 notada bend 1, vibrato 0).
+
+GuitarSet oyuncu 05'in sololarında (kendi notalarıyla) vibrato P / R kuralla 0.46 / 0.74, sınıflandırıcıyla 0.42 / 0.74; işaretlenen nota yaklaşık 56'dan 62'ye çıktı. Buradaki etiketler kuralların pickup eğrisine uygulanmasıyla üretildiği için bu satır, sınıflandırıcının kurala ne kadar benzediğini de ölçüyor; asıl soru, gerçek vibratonun az olduğu kayıtlarda (eşlikler) işaretlenen nota sayısının artıp artmadığı. Benchmark bunu artık `notes marked` satırında, 1000 notada kaç işaret olarak yazıyor:
+
+```bash
+python scripts/benchmark_techniques.py --dataset guitarset --players 05 --mode comp --notes model
+python scripts/benchmark_techniques.py --dataset guitarset --players 05 --mode comp --notes model --classifier ml/checkpoints/techniques/classifier.json
+```
+
+Adımlar:
 
 ```bash
 pip install -e ".[train]"   # scikit-learn

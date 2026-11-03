@@ -406,11 +406,15 @@ def run_guitarset(
             pairs = match(reference, estimate)
             counts["notes_ref"] += len(reference)
             counts["notes_matched"] += len(pairs)
+        counts["marked_notes"] += len(est_labels)
         for name in ("bend", "vibrato"):
             ref_on = {i for i, lab in enumerate(ref_labels) if lab[name]}
             est_on = {j for j, lab in enumerate(est_labels) if lab[name]}
             hits = {i for i in ref_on if pairs.get(i) in est_on}
             score(counts, name, ref_on, est_on, hits)
+            # Independent of the labels (the rules' verdict on the pickup): how many
+            # notes are marked at all. On comps, few notes are bent or shaken.
+            counts["marked", name] += len(est_on)
             if name == "bend":
                 for i in hits:
                     counts["amount", ref_labels[i]["bend"] == est_labels[pairs[i]]["bend"]] += 1
@@ -448,6 +452,11 @@ def report(counts: Counter, dataset: str, notes: str, errors: Sequence | None = 
         r = hit / ref if ref else 0.0
         f = 2 * p * r / (p + r) if p + r else 0.0
         print(f"{name:8s} reference {ref:5d}  detected {est:5d}  P {p:.3f}  R {r:.3f}  F {f:.3f}")
+    if counts["marked_notes"]:
+        total = counts["marked_notes"]
+        marked = {name: counts["marked", name] for name in ("bend", "vibrato")}
+        shares = ", ".join(f"{k} {n} ({1000 * n / total:.1f} per 1000)" for k, n in marked.items())
+        print(f"notes marked: {shares}, of {total} notes")
     if counts["slide", "wide"]:
         wide, hit = counts["slide", "wide"], counts["slide", "wide_hit"]
         print(f"slides of two semitones or more found: {hit} / {wide}")
