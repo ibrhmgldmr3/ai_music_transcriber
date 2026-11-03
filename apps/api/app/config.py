@@ -33,9 +33,12 @@ class Settings(BaseSettings):
     model_checkpoint: Path = REPO_ROOT / "ml" / "checkpoints" / "guitar" / "best.pt"
     # Optional second model whose tab head places notes on strings/frets.
     model_tab_checkpoint: Path | None = None
-    # Optional learned bend/vibrato decisions (scripts/train_technique_classifier.py);
-    # unset, the rules in ml/inference/techniques.py decide.
-    technique_classifier: Path | None = None
+    # Learned bend/vibrato decisions (scripts/train_technique_classifier.py), used when
+    # the file exists; missing or TECHNIQUE_CLASSIFIER= (empty), the rules in
+    # ml/inference/techniques.py decide.
+    technique_classifier: Path | None = (
+        REPO_ROOT / "ml" / "checkpoints" / "techniques" / "classifier.json"
+    )
     model_device: str | None = None  # auto | cpu | cuda
 
     @field_validator("model_tab_checkpoint", "technique_classifier", mode="before")

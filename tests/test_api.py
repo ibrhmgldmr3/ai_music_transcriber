@@ -297,6 +297,7 @@ def test_model_version_follows_the_checkpoint_file(tmp_path, monkeypatch):
     checkpoint.write_bytes(b"weights")
     monkeypatch.setattr(settings, "model_checkpoint", checkpoint)
     monkeypatch.setattr(settings, "model_tab_checkpoint", None)
+    monkeypatch.setattr(settings, "technique_classifier", tmp_path / "none" / "classifier.json")
     transcription.model_version.cache_clear()
     try:
         first = transcription.model_version()
@@ -325,6 +326,12 @@ def test_model_version_names_the_technique_classifier(tmp_path, monkeypatch):
         version = transcription.model_version()
         assert version.startswith("guitar_vX@") and "+techniques@" in version
         assert version.endswith("+" + transcription.GUITAR_METHOD)
+        assert transcription.technique_classifier() == classifier
+        # Disabled: the rules decide and the version says so.
+        monkeypatch.setattr(settings, "technique_classifier", None)
+        transcription.model_version.cache_clear()
+        assert "techniques@" not in transcription.model_version()
+        assert transcription.technique_classifier() is None
     finally:
         transcription.model_version.cache_clear()
 

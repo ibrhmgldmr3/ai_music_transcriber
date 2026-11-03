@@ -17,10 +17,9 @@ x-api-env: &api-env
   MODEL_CHECKPOINT: /repo/ml/checkpoints/${NOTES_MODEL:-guitar_v10}/best.pt
   # Tab-head model that places notes on strings/frets (ml/configs/guitar_tab_mixed.yaml):
   MODEL_TAB_CHECKPOINT: /repo/ml/checkpoints/${TAB_MODEL:-guitar_v7}/best.pt
-  # Learned bend/vibrato decisions (scripts/train_technique_classifier.py), e.g.
-  # TECHNIQUE_CLASSIFIER=/repo/ml/checkpoints/techniques/classifier.json in .env;
-  # empty: the rules decide.
-  TECHNIQUE_CLASSIFIER: ${TECHNIQUE_CLASSIFIER:-}
+  # Learned bend/vibrato decisions (scripts/train_technique_classifier.py), used when the
+  # file exists; TECHNIQUE_CLASSIFIER= (empty) in .env: the rules decide.
+  TECHNIQUE_CLASSIFIER: ${TECHNIQUE_CLASSIFIER-/repo/ml/checkpoints/techniques/classifier.json}
   CORS_ORIGINS: http://localhost:3000
 
 x-api-volumes: &api-volumes

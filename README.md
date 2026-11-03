@@ -272,7 +272,7 @@ npm install
 npm run dev
 ```
 
-API ortam değişkenleri: `DATABASE_URL`, `REDIS_URL`, `USE_CELERY`, `STORAGE_DIR`, `MODEL_CHECKPOINT`, `MODEL_TAB_CHECKPOINT`, `TECHNIQUE_CLASSIFIER` (isteğe bağlı, bkz. [Öğrenilmiş kararlar](#öğrenilmiş-kararlar-bend-ve-vibrato-sınıflandırıcısı)), `MODEL_DEVICE`, `CORS_ORIGINS`, `MAX_UPLOAD_MB`, `MAX_AUDIO_MINUTES`, `MAX_NOTES`, `JOB_TIMEOUT_MINUTES`, `EXPOSE_DOCS`. Web için: `NEXT_PUBLIC_API_URL`. Docker Compose'da veritabanı parolası `POSTGRES_PASSWORD` ile değiştirilebilir.
+API ortam değişkenleri: `DATABASE_URL`, `REDIS_URL`, `USE_CELERY`, `STORAGE_DIR`, `MODEL_CHECKPOINT`, `MODEL_TAB_CHECKPOINT`, `TECHNIQUE_CLASSIFIER` (varsayılan `ml/checkpoints/techniques/classifier.json`, dosya yoksa kurallar; bkz. [Öğrenilmiş kararlar](#öğrenilmiş-kararlar-bend-ve-vibrato-sınıflandırıcısı)), `MODEL_DEVICE`, `CORS_ORIGINS`, `MAX_UPLOAD_MB`, `MAX_AUDIO_MINUTES`, `MAX_NOTES`, `JOB_TIMEOUT_MINUTES`, `EXPOSE_DOCS`. Web için: `NEXT_PUBLIC_API_URL`. Docker Compose'da veritabanı parolası `POSTGRES_PASSWORD` ile değiştirilebilir.
 
 ## Editörde dinleme ve çalışma
 
@@ -653,7 +653,7 @@ Yukarıdaki tablo, vibratoda kaybın nota modelinde değil kuralda olduğunu gö
 - **Model:** lojistik regresyon ya da gradient-boosted ağaçlar; seçim ve karar eşiği çekim bazında gruplanmış çapraz doğrulamayla (bir çekimin notaları hem eğitimde hem ölçümde olmuyor). Skor, etiketli notaların tamamı üzerinden F: gevşek kuralın aday bulmadığı bend'ler kaçırılmış sayılıyor. Kuralın aynı satırlardaki skoru yanında yazıyor.
 - **Dosya:** JSON (pickle yok). Çıkarım yalnızca numpy ile; scikit-learn yalnızca eğitimde gerekiyor. Dosyada bir teknik yoksa onu kural belirliyor.
 
-**İlk sonuç: hiç bakılmayan LP gitarında iki teknikte de kuraldan iyi; varsayılan yapılmadan önce yanlış işaretler kontrol ediliyor.** Eğitim AR ve FS gitarlarıyla (modelin notalarıyla ve IDMT'nin notalarıyla yapılan iki döküm birlikte), ölçüm LP'de.
+**Sonuç: hiç bakılmayan LP gitarında iki teknikte de kuraldan iyi, eşliklerde yanlış işaret artmıyor; uygulama `ml/checkpoints/techniques/classifier.json` varsa onu kullanıyor.** Eğitim AR ve FS gitarlarıyla (modelin notalarıyla ve IDMT'nin notalarıyla yapılan iki döküm birlikte), ölçüm LP'de.
 
 AR+FS çapraz doğrulaması (çekim bazında 5 kat; aynı satırlarda kural):
 
@@ -668,17 +668,21 @@ IDMT LP, modelin notalarıyla (uygulamanın yaptığı; V10 + V7, harmonik topla
 
 | IDMT LP | Bend P / R / F | Vibrato P / R / F | Slide P / R / F |
 |---|---|---|---|
-| Kurallar | 0.78 / 0.25 / 0.37 | 0.82 / 0.33 / 0.47 | 0.83 / 0.14 / 0.24 |
+| Kurallar | 0.78 / 0.25 / 0.37 | 0.82 / 0.33 / 0.47 | 0.83 / 0.14 / 0.23 |
 | **Sınıflandırıcı** | 0.76 / 0.33 / **0.46** | 0.79 / 0.48 / **0.60** | 0.83 / 0.14 / 0.23 |
 
 Bend'de 57'nin 19'u (kuralla 14), vibratoda 54'ün 26'sı (kuralla 18) bulunuyor; kesinlik 2–3 puan düşüyor. Slide kuralı değişmedi. Normal notaların hemen hiçbiri işaretlenmiyor (1027 notada bend 1, vibrato 0).
 
-GuitarSet oyuncu 05'in sololarında (kendi notalarıyla) vibrato P / R kuralla 0.46 / 0.74, sınıflandırıcıyla 0.42 / 0.74; işaretlenen nota yaklaşık 56'dan 62'ye çıktı. Buradaki etiketler kuralların pickup eğrisine uygulanmasıyla üretildiği için bu satır, sınıflandırıcının kurala ne kadar benzediğini de ölçüyor; asıl soru, gerçek vibratonun az olduğu kayıtlarda (eşlikler) işaretlenen nota sayısının artıp artmadığı. Benchmark bunu artık `notes marked` satırında, 1000 notada kaç işaret olarak yazıyor:
+GuitarSet oyuncu 05'in sololarında (kendi notalarıyla) vibrato P / R kuralla 0.46 / 0.74, sınıflandırıcıyla 0.42 / 0.74; işaretlenen nota yaklaşık 56'dan 62'ye çıktı. Buradaki etiketler kuralların pickup eğrisine uygulanmasıyla üretildiği için bu satır, sınıflandırıcının kurala ne kadar benzediğini de ölçüyor; asıl soru, gerçek vibratonun az olduğu kayıtlarda (eşlikler) işaretlenen nota sayısının artıp artmadığı. Benchmark bunu `notes marked` satırında, 1000 notada kaç işaret olarak da yazıyor. Oyuncu 05'in 30 eşliğinde, modelin notalarıyla (`--mode comp --notes model`; eşleşen 5283 referans nota):
 
-```bash
-python scripts/benchmark_techniques.py --dataset guitarset --players 05 --mode comp --notes model
-python scripts/benchmark_techniques.py --dataset guitarset --players 05 --mode comp --notes model --classifier ml/checkpoints/techniques/classifier.json
-```
+| GuitarSet oyuncu 05 eşlikler | İşaretlenen bend | İşaretlenen vibrato |
+|---|---|---|
+| Kurallar | 1 | 10 |
+| Sınıflandırıcı | 2 | 10 |
+
+Eşliklerde neredeyse hiç işaret yok, sınıflandırıcı bunu değiştirmiyor. (Bu satırdaki referans bend'ler, 34, pickup eğrisinin atak çukurlarından geliyor; bkz. yukarıdaki not.)
+
+**Lisans:** IDMT-SMT-Guitar CC BY-NC-ND 4.0. Onunla eğitilen dosya repoya konmuyor (`ml/checkpoints` gibi yerelde kalıyor) ve ticari kullanım için değil. Dosya yoksa uygulama kurallarla çalışıyor; aşağıdaki adımlarla herkes kendi kopyasını eğitebiliyor.
 
 Adımlar:
 
@@ -697,7 +701,7 @@ python scripts/benchmark_techniques.py --dataset guitarset --players 05 --classi
 
 Modelin notalarıyla yapılan dökümde her nota, eşleştiği IDMT notasının etiketini alıyor; tam eşleşmeyen notalar 50 ms içinde başlayan ve en çok üç yarım ton uzaktaki IDMT notasının etiketini (bükülmüş perdeden yazılmış bend'ler), o da yoksa "normal" (modelin uydurduğu notalar). GuitarSet satırı, teknik etiketi olmayan normal notalarda yanlış işaret sayısının artmadığını kontrol etmek için.
 
-Kullanmak için: API'de `TECHNIQUE_CLASSIFIER=ml/checkpoints/techniques/classifier.json` (Docker'da `.env`'e `TECHNIQUE_CLASSIFIER=/repo/ml/checkpoints/techniques/classifier.json`), komut satırında `python -m ml.inference.predict kayit.wav --technique-classifier ...`. Dosya modelin sürümüne (`model_version`) katılıyor, böylece proje listesi eski kararlarla çözülmüş projeleri işaretliyor.
+Kullanım: API (Docker dahil) `ml/checkpoints/techniques/classifier.json` dosyası varsa onu kullanıyor; başka bir dosya `TECHNIQUE_CLASSIFIER` ile seçiliyor, boş bırakılırsa (`TECHNIQUE_CLASSIFIER=`) kurallar karar veriyor. Komut satırında `python -m ml.inference.predict kayit.wav --technique-classifier ...`. Dosya modelin sürümüne (`model_version`, ör. `...+techniques@1a2b3c4d+beats-btc-tech@2`) katılıyor, böylece proje listesi kurallarla çözülmüş projeleri eski olarak işaretliyor ve düzenlenmemiş olanlar tek tuşla yeniden çözümlenebiliyor.
 
 ## Farklı akortlar ve capo
 

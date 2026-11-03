@@ -35,8 +35,19 @@ def get_predictor():
         settings.model_checkpoint,
         device=settings.model_device,
         tab_checkpoint=settings.model_tab_checkpoint,
-        technique_classifier=settings.technique_classifier,
+        technique_classifier=technique_classifier(),
     )
+
+
+def technique_classifier() -> Path | None:
+    """The learned bend/vibrato decisions in use: ``TECHNIQUE_CLASSIFIER`` if that file
+    exists (it is trained locally on IDMT-SMT-Guitar, see the README), else None and the
+    rules decide."""
+    path = settings.technique_classifier
+    if path is not None and not path.is_file():
+        logger.info("No technique classifier at %s; bends and vibrato follow the rules", path)
+        return None
+    return path
 
 
 # The guitar method around the models: beats and chords tracked in the recording,
@@ -58,8 +69,9 @@ def model_version() -> str:
     paths = [settings.model_checkpoint]
     if settings.model_tab_checkpoint:
         paths.append(settings.model_tab_checkpoint)
-    if settings.technique_classifier:
-        paths.append(settings.technique_classifier)
+    classifier = technique_classifier()
+    if classifier:
+        paths.append(classifier)
     return "+".join([*(_fingerprint(path) for path in paths), GUITAR_METHOD])
 
 

@@ -1,11 +1,12 @@
 """IDMT-SMT-Guitar (Kehling et al., DAFx 2014): guitar notes labeled with how they were played.
 
-Used to measure playing-technique detection (``ml.inference.techniques``), not for
-training. Subset 2 has 261 takes on three electric guitars (AR: Aristides 010, FS: Fender
-Strat, LP: Gibson Les Paul), one player: chromatic runs on every string, isolated
-bends, slides, vibrato, harmonics and dead notes, and licks mixing them. Every note is
-labeled with its string and fret, a plucking ("excitation") style and an expression
-style:
+Used to measure playing-technique detection (``ml.inference.techniques``) and to fit
+its learned decisions (``ml.inference.technique_classifier``, on the AR and FS guitars;
+LP is kept for the test). Subset 2 has 261 takes on three electric guitars (AR:
+Aristides 010, FS: Fender Strat, LP: Gibson Les Paul), one player: chromatic runs on
+every string, isolated bends, slides, vibrato, harmonics and dead notes, and licks
+mixing them. Every note is labeled with its string and fret, a plucking ("excitation")
+style and an expression style:
 
     NO normal   BE bend   SL slide   VI vibrato   HA harmonic   DN dead note
 
@@ -19,7 +20,8 @@ Layout after unzipping the Zenodo archive (record 7544110) into ``ml/data/raw/id
     IDMT-SMT-GUITAR_V2/dataset2/annotation/AR_Lick11_FNVSBHD.xml
     IDMT-SMT-GUITAR_V2/dataset2/audio/AR_Lick11_FNVSBHD.wav
 
-License CC BY-NC-ND 4.0 (non-commercial, no derivatives).
+License CC BY-NC-ND 4.0 (non-commercial, no derivatives): a classifier fitted on it
+stays a local file (ml/checkpoints is not committed) and is not for commercial use.
 """
 
 from __future__ import annotations
