@@ -673,12 +673,12 @@ IDMT LP, modelin notalarıyla (uygulamanın yaptığı; V10 + V7, harmonik topla
 
 Bend'de 57'nin 19'u (kuralla 14), vibratoda 54'ün 26'sı (kuralla 18) bulunuyor; kesinlik 2–3 puan düşüyor. Slide kuralı değişmedi. Normal notaların hemen hiçbiri işaretlenmiyor (1027 notada bend 1, vibrato 0).
 
-GuitarSet oyuncu 05'in sololarında (kendi notalarıyla) vibrato P / R kuralla 0.46 / 0.74, sınıflandırıcıyla 0.42 / 0.74; işaretlenen nota yaklaşık 56'dan 62'ye çıktı. Buradaki etiketler kuralların pickup eğrisine uygulanmasıyla üretildiği için bu satır, sınıflandırıcının kurala ne kadar benzediğini de ölçüyor; asıl soru, gerçek vibratonun az olduğu kayıtlarda (eşlikler) işaretlenen nota sayısının artıp artmadığı. Benchmark bunu `notes marked` satırında, 1000 notada kaç işaret olarak da yazıyor. Oyuncu 05'in 30 eşliğinde, modelin notalarıyla (`--mode comp --notes model`; eşleşen 5283 referans nota):
+GuitarSet oyuncu 05'in sololarında (kendi notalarıyla) vibrato P / R kuralla 0.46 / 0.74, sınıflandırıcıyla 0.42 / 0.74; işaretlenen nota yaklaşık 56'dan 62'ye çıktı. Buradaki etiketler kuralların pickup eğrisine uygulanmasıyla üretildiği için bu satır, sınıflandırıcının kurala ne kadar benzediğini de ölçüyor; asıl soru, gerçek vibratonun az olduğu kayıtlarda (eşlikler) işaretlenen nota sayısının artıp artmadığı. Benchmark bunu `notes marked` satırında, 1000 notada kaç işaret olarak da yazıyor. Oyuncu 05'in 30 eşliğinde, modelin notalarıyla (`--mode comp --notes model`; 5953 nota):
 
 | GuitarSet oyuncu 05 eşlikler | İşaretlenen bend | İşaretlenen vibrato |
 |---|---|---|
-| Kurallar | 1 | 10 |
-| Sınıflandırıcı | 2 | 10 |
+| Kurallar | 1 (1000 notada 0.2) | 10 (1000 notada 1.7) |
+| Sınıflandırıcı | 2 (1000 notada 0.3) | 10 (1000 notada 1.7) |
 
 Eşliklerde neredeyse hiç işaret yok, sınıflandırıcı bunu değiştirmiyor. (Bu satırdaki referans bend'ler, 34, pickup eğrisinin atak çukurlarından geliyor; bkz. yukarıdaki not.)
 
